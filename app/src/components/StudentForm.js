@@ -207,7 +207,7 @@ export function StudentForm({ visible, onClose, student, defaultGroupIds = [], o
           value={fullName}
           onChangeText={(t) => setFullName(t.toUpperCase())}
           autoCapitalize="characters"
-          placeholder="APELLIDOS NOMBRES"
+          placeholder="NOMBRES APELLIDOS"
           error={errors.fullName}
         />
         <Field
