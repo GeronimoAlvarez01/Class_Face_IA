@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "Asistencia Facial",
+    "slug": "asistencia-facial",
+    "version": "1.0.0",
+    "orientation": "default",
+    "userInterfaceStyle": "automatic",
+    "android": {
+      "package": "co.edu.asistencia.facial",
+      "permissions": ["CAMERA"]
+    },
+    "web": { "bundler": "metro" },
+    "plugins": [
+      ["expo-camera", { "cameraPermission": "La cámara se usa para reconocer a los estudiantes y tomar la asistencia." }],
+      ["expo-build-properties", { "android": { "usesCleartextTraffic": true } }]
+    ]
+  }
+}

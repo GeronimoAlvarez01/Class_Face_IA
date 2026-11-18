@@ -1,0 +1,5 @@
+# Mismos saltos de línea en Mac y Windows: evita diffs fantasma y scripts rotos al pasar el proyecto entre equipos
+* text=auto eol=lf
+*.db binary
+*.jpg binary
+*.png binary

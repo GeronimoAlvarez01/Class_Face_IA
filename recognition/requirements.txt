@@ -1,0 +1,9 @@
+starlette
+uvicorn
+numpy
+pillow
+torch
+torchvision
+# facenet-pytorch se instala APARTE y sin dependencias, para que no degrade el torch instalado:
+#   pip install facenet-pytorch --no-deps
+# (pytest solo si va a correr las pruebas)
