@@ -2,7 +2,9 @@
 
   POST   /enroll      {student_id, image_base64, replace}      -> 200 {ok, faces} | 422 {detail}
   DELETE /students/{student_id}                                 -> 200 | 404
-  POST   /recognize   {image_base64, candidate_ids}             -> 200 {faces, match, similarity, reason}
+  POST   /recognize   {image_base64, candidate_ids}             -> 200 {faces, match, similarity, reason, box}
+                      (box = [x1, y1, x2, y2] normalizada 0..1 del rostro único, o null; con candidate_ids = []
+                       sirve solo para detectar el rostro y su posición)
   GET    /health
 """
 from __future__ import annotations
@@ -143,7 +145,9 @@ def create_app(engine_factory: Callable[[Settings], Engine], settings: Settings)
             return _json(200, {"faces": result.faces, "match": None, "similarity": 0.0, "reason": "faces"})
 
         m = identify(result.embedding, state["store"].snapshot(), candidates, settings.tau, settings.min_margin)
-        return _json(200, {"faces": 1, "match": m.student_id, "similarity": round(m.similarity, 4), "reason": m.reason})
+        box = [round(v, 4) for v in result.box] if result.box else None
+        return _json(200, {"faces": 1, "match": m.student_id, "similarity": round(m.similarity, 4),
+                           "reason": m.reason, "box": box})
 
     return Starlette(
         routes=[

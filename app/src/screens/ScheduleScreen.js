@@ -68,7 +68,7 @@ export default function ScheduleScreen() {
         week: e.week, ...(e.cancelled ? { cancelled: true } : {}), ...(e.date ? { date: e.date } : {}),
       }));
       await api.schedule.save(groupId, { start_date: start, weeks, exceptions });
-      toast('Calendario guardado', 'success');
+      toast('Calendario guardado correctamente', 'success', { duration: 4000 }); // visible 4 s y se cierra solo
       reloadGroups();
       sched.reload();
     } catch (e) {

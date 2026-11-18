@@ -3,6 +3,7 @@ const path = require('node:path');
 const { Router, HttpError, created, binary } = require('./http');
 const { tx } = require('./db');
 const { ValidationError, buildSchedule, weekdayLabel, shortDateLabel } = require('./schedule');
+const { parseGuide, checkFaceInGuide, GUIDE_MESSAGES } = require('./guide');
 
 const DOC_RE = /^[A-Za-z0-9]{4,20}$/;
 const STATUSES = new Set(['present', 'absent']);
@@ -358,6 +359,7 @@ function buildApi({ db, cfg, recognition, clock }) {
       throw new HttpError(409, `Solo se toma asistencia el día de la clase (${session.session_date})`);
     }
     const img = decodeImage(body.image_base64, 'image_base64');
+    const guide = cfg.faceGuide === false ? null : parseGuide(body.guide); // recuadro punteado que ve el profesor; opcional
     const members = db.prepare(`SELECT s.* FROM students s JOIN group_students gs ON gs.student_id = s.id
                                 WHERE gs.group_id = ?`).all(session.group_id);
     if (members.length === 0) throw new HttpError(409, 'El grupo no tiene estudiantes matriculados');
@@ -367,6 +369,9 @@ function buildApi({ db, cfg, recognition, clock }) {
     if (!result.faces) return { status: 'no_face', message: 'No se detectó ningún rostro' };
     // Con varios rostros no sabemos a cuál se enfocó: no se marca nada (una falsa asistencia es peor que repetir la foto)
     if (result.faces > 1) return { status: 'multiple_faces', message: 'Aparece más de una persona; enfoque a un solo estudiante' };
+    // Solo cuenta el rostro que está dentro del recuadro: se comprueba ANTES de buscar al estudiante o marcar nada
+    const fit = checkFaceInGuide(result.box, guide);
+    if (!fit.ok) return { status: 'out_of_guide', reason: fit.reason, message: GUIDE_MESSAGES[fit.reason] };
 
     const student = members.find((m) => m.document === result.match);
     if (!student) return { status: 'unknown', similarity };
@@ -381,6 +386,22 @@ function buildApi({ db, cfg, recognition, clock }) {
                   similarity = excluded.similarity, marked_at = excluded.marked_at`)
       .run(session.id, student.id, similarity, new Date().toISOString());
     return { status: 'marked', student: studentView(student), similarity, ...(result.mock ? { mock: true } : {}) };
+  });
+
+  // =====================================================================
+  // Comprobación de rostro (sin guardar nada): la usa la app al registrar a un estudiante para tomar la foto
+  // sola en cuanto el rostro está bien encuadrado.
+  // =====================================================================
+
+  router.add('POST', '/api/face-check', async ({ body }) => {
+    const img = decodeImage(body.image_base64, 'image_base64');
+    const guide = cfg.faceGuide === false ? null : parseGuide(body.guide);
+    const result = await recognition.recognize(img.b64, []);
+    if (!result.faces) return { status: 'no_face', message: 'No se detectó ningún rostro' };
+    if (result.faces > 1) return { status: 'multiple_faces', message: 'Aparece más de una persona; debe verse un solo rostro' };
+    const fit = checkFaceInGuide(result.box, guide);
+    if (!fit.ok) return { status: 'out_of_guide', reason: fit.reason, message: GUIDE_MESSAGES[fit.reason] };
+    return { status: 'ok' };
   });
 
   return router;

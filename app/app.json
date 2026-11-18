@@ -8,7 +8,9 @@
     "android": {
       "package": "co.edu.asistencia.facial",
       "permissions": [
-        "CAMERA"
+        "CAMERA",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -30,6 +32,11 @@
         }
       ],
       "expo-status-bar"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "e74bc476-76e0-46f3-80d3-2a109154cf99"
+      }
+    }
   }
 }

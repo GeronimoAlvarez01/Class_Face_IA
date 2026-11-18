@@ -70,7 +70,7 @@ export default function ScanScreen({ groupId, onClose }) {
     setBusy(true);
     try {
       const photo = await camRef.current.capture(0.5);
-      const res = await api.recognize(session.id, photo.base64);
+      const res = await api.recognize(session.id, photo.base64, photo.guide);
       const view = describeResult(res);
       if (view.kind === 'hint') {
         setHint(view.message);
@@ -122,8 +122,10 @@ export default function ScanScreen({ groupId, onClose }) {
     return centered(<EmptyState icon="people" title="El grupo no tiene estudiantes" message="Agregue estudiantes con su foto antes de tomar asistencia." />);
   }
 
-  const guideColor = modal?.kind === 'success' ? colors.successStrong : modal?.kind === 'error' ? colors.danger : 'rgba(255,255,255,0.85)';
-  const statusText = busy ? 'Reconociendo…' : hint ?? (auto ? 'Escaneo automático activo. Enfoque a un estudiante.' : 'Toque el botón para capturar.');
+  // Verde y continuo cuando el rostro quedó reconocido (o ya estaba registrado); rojo si no coincide; ámbar si hay que reencuadrar
+  const recognized = modal?.kind === 'success' || modal?.kind === 'info';
+  const guideColor = recognized ? colors.successStrong : modal?.kind === 'error' ? colors.danger : hint ? '#FBBF24' : 'rgba(255,255,255,0.85)';
+  const statusText = busy ? 'Reconociendo…' : hint ?? (auto ? 'Encuadre el rostro dentro del recuadro punteado.' : 'Encuadre el rostro y toque el botón para capturar.');
   const filtered = missing.filter((s) => `${s.full_name} ${s.document}`.toLowerCase().includes(search.trim().toLowerCase()));
 
   const panel = (
@@ -161,7 +163,7 @@ export default function ScanScreen({ groupId, onClose }) {
         style={{ flex: 1, borderRadius: 0 }}
         overlay={(
           <>
-            <FaceGuide color={guideColor} />
+            <FaceGuide color={guideColor} solid={recognized} />
 
             {/* Barra superior */}
             <View style={{ position: 'absolute', top: insets.top + 12, left: 12, right: 12, flexDirection: 'row', alignItems: 'center', gap: space.sm, backgroundColor: GLASS, borderRadius: radius.pill, paddingRight: space.md }}>

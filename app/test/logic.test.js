@@ -108,3 +108,44 @@ test('errores de red y de servicio se explican en español claro', () => {
   assert.deepEqual(day.actions, []);
   assert.match(day.message, /2026-11-19/);
 });
+
+// ---------- recuadro guía ----------
+
+const { computeGuide, ovalSize } = require('../src/lib/guide');
+const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} no es ≈ ${b}`);
+
+test('guía: el óvalo mide el 72 % del alto y está centrado en la foto', () => {
+  // Foto con la misma proporción que la vista: el óvalo ocupa 36 % de semialto de la foto
+  const g = computeGuide({ width: 1000, height: 700 }, { width: 2000, height: 1400 });
+  assert.equal(g.cx, 0.5);
+  assert.equal(g.cy, 0.5);
+  near(g.ry, 0.36);
+  near(g.rx, (0.72 * 700 * 0.78) / 2 / 0.5 / 2000);
+});
+
+test('guía: si la vista previa recorta los lados de la foto, el óvalo ocupa menos ancho de la foto', () => {
+  const same = computeGuide({ width: 1000, height: 700 }, { width: 2000, height: 1400 });
+  const wider = computeGuide({ width: 1000, height: 700 }, { width: 4000, height: 2000 }); // foto más panorámica que la vista
+  near(wider.ry, 0.36);                 // el alto sigue encajando
+  assert.ok(wider.rx < same.rx);        // pero los lados se recortan
+});
+
+test('guía: en pantallas verticales el óvalo no se sale del ancho', () => {
+  const { w, h } = ovalSize(400, 800);
+  near(w, 400 * 0.92);
+  near(h, (400 * 0.92) / 0.78);
+  const g = computeGuide({ width: 400, height: 800 }, { width: 1500, height: 3000 });
+  assert.ok(g.rx <= 0.5 && g.ry <= 0.5);
+});
+
+test('guía: sin medidas no se calcula (el servidor no valida el encuadre)', () => {
+  assert.equal(computeGuide(null, { width: 10, height: 10 }), undefined);
+  assert.equal(computeGuide({ width: 10, height: 10 }, {}), undefined);
+});
+
+test('resultado fuera del recuadro es un aviso discreto, no una modal', () => {
+  const v = describeResult({ status: 'out_of_guide', reason: 'outside', message: 'Encuadre el rostro dentro del recuadro punteado' });
+  assert.equal(v.kind, 'hint');
+  assert.match(v.message, /recuadro/);
+  assert.equal(describeResult({ status: 'out_of_guide' }).kind, 'hint');
+});

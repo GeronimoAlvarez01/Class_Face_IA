@@ -1,33 +1,85 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Image, Modal, Pressable, View } from 'react-native';
+import { Image, Modal, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api, bumpPhotos, photoUrl } from '../api';
 import { useApp } from '../context';
 import { Avatar, Button, Card, Checkbox, Chip, Field, Icon, IconButton, InlineError, Sheet, Text, haptic, useFeedback } from '../ui';
 import { CameraBox, FaceGuide } from './CameraBox';
+import { ResultModal } from './ResultModal';
 import { radius, space, useTheme } from '../theme';
 
 const DOC_RE = /^[A-Za-z0-9]{4,20}$/;
 
-/** Pantalla completa de cámara para fotografiar al estudiante (una foto de frente). */
+const CHECK_EVERY_MS = 1000;       // un cuadro de prueba por segundo mientras no haya foto
+const SUCCESS_MODAL = {
+  kind: 'success', title: 'Foto registrada correctamente', message: 'El rostro quedó bien encuadrado.', autoCloseMs: 2200,
+};
+
+/**
+ * Pantalla completa de cámara para fotografiar al estudiante. NO hay botón de disparo: la persona encuadra el
+ * rostro dentro del óvalo y, cuando el servidor confirma que está bien encuadrado, el óvalo se pone verde, se toma
+ * la foto sola y sale una modal de confirmación.
+ */
 function CaptureModal({ visible, onClose, onCaptured }) {
   const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
   const camRef = useRef(null);
-  const [facing, setFacing] = useState('back');
-  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const doneRef = useRef(false);
+  const [facing, setFacing] = useState('front');
+  const [hint, setHint] = useState('Ubique su rostro dentro del recuadro punteado.');
+  const [problem, setProblem] = useState(false);
+  const [result, setResult] = useState(null);   // la modal "Foto registrada correctamente"
+  const [photo, setPhoto] = useState(null);
 
-  const take = async () => {
-    if (busy || !camRef.current?.isReady()) return;
-    setBusy(true);
-    try {
-      haptic.tap();
-      // Calidad alta: esta foto es la referencia de por vida del estudiante
-      onCaptured(await camRef.current.capture(0.85));
-      onClose();
-    } finally {
-      setBusy(false);
-    }
+  useEffect(() => {
+    if (!visible) return undefined;
+    doneRef.current = false;
+    busyRef.current = false;
+    setResult(null);
+    setPhoto(null);
+    setProblem(false);
+    setHint('Ubique su rostro dentro del recuadro punteado.');
+
+    const tick = async () => {
+      if (busyRef.current || doneRef.current || !camRef.current?.isReady()) return;
+      busyRef.current = true;
+      try {
+        // 1) cuadro de prueba, barato
+        const probe = await camRef.current.capture(0.4);
+        const first = await api.faceCheck(probe.base64, probe.guide);
+        if (doneRef.current) return;
+        if (first.status !== 'ok') { setProblem(true); setHint(first.message ?? 'Encuadre el rostro dentro del recuadro.'); return; }
+        // 2) foto buena (es la referencia de por vida del estudiante) y se comprueba ELLA, no solo el cuadro de prueba
+        const final = await camRef.current.capture(0.8);
+        const second = await api.faceCheck(final.base64, final.guide);
+        if (doneRef.current) return;
+        if (second.status !== 'ok') { setProblem(true); setHint(second.message ?? 'Mantenga el rostro quieto dentro del recuadro.'); return; }
+        doneRef.current = true;
+        setProblem(false);
+        setPhoto(final);
+        setResult(SUCCESS_MODAL);
+      } catch (e) {
+        setProblem(true);
+        setHint(e.status === 0 ? 'No hay conexión con el servidor.' : e.message || 'No se pudo revisar la foto.');
+      } finally {
+        busyRef.current = false;
+      }
+    };
+
+    const id = setInterval(tick, CHECK_EVERY_MS);
+    return () => { clearInterval(id); doneRef.current = true; };
+  }, [visible]);
+
+  const finish = () => {
+    const taken = photo;
+    setResult(null);
+    if (taken) onCaptured(taken);
+    onClose();
   };
+
+  const ok = !!result;
+  const guideColor = ok ? colors.successStrong : problem ? '#FBBF24' : 'rgba(255,255,255,0.85)';
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose} statusBarTranslucent>
@@ -38,26 +90,26 @@ function CaptureModal({ visible, onClose, onCaptured }) {
           style={{ flex: 1, borderRadius: 0 }}
           overlay={(
             <>
-              <FaceGuide />
+              <FaceGuide color={guideColor} solid={ok} />
               <View style={{ position: 'absolute', top: insets.top + 12, left: 12, right: 12, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: radius.pill, paddingRight: space.md }}>
                 <IconButton icon="close" label="Cancelar" tone="#FFFFFF" onPress={onClose} />
                 <Text weight="700" color="#FFFFFF" style={{ flex: 1 }}>Foto de frente, con buena luz</Text>
                 <IconButton icon="camera-reverse" label="Cambiar de cámara" tone="#FFFFFF" onPress={() => setFacing((f) => (f === 'back' ? 'front' : 'back'))} />
               </View>
-              <View style={{ position: 'absolute', left: 0, right: 0, bottom: insets.bottom + 24, alignItems: 'center' }}>
-                <Pressable
-                  onPress={take}
-                  disabled={busy}
-                  accessibilityRole="button"
-                  accessibilityLabel="Tomar foto"
-                  style={({ pressed }) => ({ width: 82, height: 82, borderRadius: 41, borderWidth: 5, borderColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', opacity: busy ? 0.5 : pressed ? 0.8 : 1 })}
+              <View style={{ position: 'absolute', left: 0, right: 0, bottom: insets.bottom + 28, alignItems: 'center' }}>
+                <View
+                  accessibilityLiveRegion="polite"
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: radius.pill, paddingHorizontal: space.lg, paddingVertical: space.md, maxWidth: '90%' }}
                 >
-                  {busy ? <ActivityIndicator color="#FFFFFF" /> : <View style={{ width: 62, height: 62, borderRadius: 31, backgroundColor: '#FFFFFF' }} />}
-                </Pressable>
+                  <Icon name={ok ? 'checkmark-circle' : problem ? 'alert-circle' : 'scan'} size={20} color={ok ? 'success' : problem ? '#FBBF24' : '#FFFFFF'} />
+                  <Text color="#FFFFFF" style={{ flexShrink: 1 }}>{ok ? 'Rostro encuadrado' : hint}</Text>
+                </View>
               </View>
             </>
           )}
         />
+        {/* Dentro de este Modal para que se vea encima en iOS y Android */}
+        <ResultModal result={result} onClose={finish} />
       </View>
     </Modal>
   );

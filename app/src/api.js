@@ -93,8 +93,13 @@ export const api = {
     save: (gid, changes) => request('PUT', `/api/groups/${gid}/grid`, { changes }),
   },
 
-  recognize: (sessionId, imageBase64) =>
-    request('POST', `/api/sessions/${sessionId}/recognize`, { image_base64: imageBase64 }, { timeoutMs: 25000 }),
+  // `guide` = dónde está el óvalo punteado dentro de la foto; el servidor solo da por buena la cara que esté dentro
+  recognize: (sessionId, imageBase64, guide) =>
+    request('POST', `/api/sessions/${sessionId}/recognize`, { image_base64: imageBase64, guide }, { timeoutMs: 25000 }),
+
+  // ¿Hay un rostro bien encuadrado? No guarda nada; lo usa el registro de estudiantes para tomar la foto sola.
+  faceCheck: (imageBase64, guide) =>
+    request('POST', '/api/face-check', { image_base64: imageBase64, guide }, { timeoutMs: 25000 }),
 };
 
 // La foto de un estudiante conserva la misma URL al reemplazarla; el sufijo ?v= evita ver la foto vieja en caché.

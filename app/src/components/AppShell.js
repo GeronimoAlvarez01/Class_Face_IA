@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, View, useWindowDimensions } from 'react-native';
+import { Image, Pressable, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, Icon, Text, haptic } from '../ui';
 import { radius, space, useTheme } from '../theme';
@@ -53,9 +53,12 @@ export function AppShell({ route, onNavigate, connectionError, children }) {
       <View style={{ flex: 1, flexDirection: 'row', backgroundColor: colors.bg }}>
         <View style={{ width: RAIL_WIDTH, paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.lg, backgroundColor: colors.surface, borderRightWidth: 1, borderColor: colors.border, gap: space.sm }}>
           <View style={{ alignItems: 'center', marginBottom: space.lg }}>
-            <View style={{ width: 48, height: 48, borderRadius: 16, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' }}>
-              <Icon name="scan" size={26} color="primaryText" />
-            </View>
+            <Image
+              source={require('../../assets/logo-class-face.png')}
+              style={{ width: 48, height: 48, borderRadius: 16 }}
+              resizeMode="cover"
+              accessibilityLabel="Logo"
+            />
           </View>
           {NAV_ITEMS.map((it) => <NavItem key={it.key} item={it} active={route === it.key} onPress={onNavigate} />)}
         </View>

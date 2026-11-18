@@ -26,6 +26,9 @@ function describeResult(res) {
       return { kind: 'hint', message: 'No veo ningún rostro. Enfoque al estudiante de frente.' };
     case 'multiple_faces':
       return { kind: 'hint', message: 'Hay más de una persona. Enfoque a un solo estudiante.' };
+    case 'out_of_guide':
+      // El rostro se detectó pero no está dentro del recuadro punteado: no se marca nada
+      return { kind: 'hint', message: res.message || 'Encuadre el rostro dentro del recuadro punteado.' };
     default:
       return { kind: 'hint', message: 'Respuesta inesperada del servidor.' };
   }

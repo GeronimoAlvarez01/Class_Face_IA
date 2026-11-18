@@ -278,3 +278,74 @@ test('cliente HTTP del servicio de reconocimiento respeta el contrato (y devuelv
   }
   await assert.rejects(client.recognize('QUJD', []), (e) => e.status === 503);
 });
+
+// ---------- recuadro guía: solo cuenta el rostro que está dentro del óvalo ----------
+
+const GUIDE = { cx: 0.5, cy: 0.5, rx: 0.3, ry: 0.4 };
+const BOX_INSIDE = [0.38, 0.32, 0.62, 0.68];   // rostro centrado y de buen tamaño
+const BOX_ASIDE = [0.02, 0.32, 0.26, 0.68];    // rostro pegado al borde izquierdo (fuera del óvalo)
+const BOX_FAR = [0.46, 0.46, 0.54, 0.54];      // dentro, pero diminuto (muy lejos)
+
+test('guía: geometría pura (dentro, fuera, muy pequeño, sin datos)', () => {
+  const { checkFaceInGuide, parseGuide } = require('../src/guide');
+  assert.deepEqual(checkFaceInGuide(BOX_INSIDE, GUIDE), { ok: true });
+  assert.deepEqual(checkFaceInGuide(BOX_ASIDE, GUIDE), { ok: false, reason: 'outside' });
+  assert.deepEqual(checkFaceInGuide(BOX_FAR, GUIDE), { ok: false, reason: 'too_small' });
+  assert.deepEqual(checkFaceInGuide([0.1, 0.0, 0.9, 1.0], GUIDE), { ok: false, reason: 'outside' }); // desborda el óvalo
+  // Sin guía o sin caja (modo mock) no se bloquea nada
+  assert.deepEqual(checkFaceInGuide(BOX_ASIDE, null), { ok: true });
+  assert.deepEqual(checkFaceInGuide(undefined, GUIDE), { ok: true });
+  assert.equal(parseGuide(undefined), null);
+  assert.throws(() => parseGuide({ cx: 0.5, cy: 0.5, rx: 0, ry: 0.4 }), (e) => e.status === 400);
+  assert.throws(() => parseGuide({ cx: 'x', cy: 0.5, rx: 0.3, ry: 0.4 }), (e) => e.status === 400);
+});
+
+test('reconocimiento: un rostro fuera del recuadro NO marca asistencia; dentro sí', async () => {
+  const env = await setup();
+  try {
+    const { group, sessions } = await seed(env);
+    const week14 = sessions.find((s) => s.week_number === 14);
+    env.clock.date = '2026-11-12';
+    const url = `/api/sessions/${week14.id}/recognize`;
+    const countPresent = () => env.db.prepare("SELECT COUNT(*) AS n FROM attendance WHERE status = 'present'").get().n;
+
+    // El servicio reconocería al estudiante, pero está fuera del óvalo
+    env.recognition.next = { faces: 1, match: '1007074776', similarity: 0.9, box: BOX_ASIDE };
+    const out = await env.call('POST', url, { image_base64: JPEG_B64, guide: GUIDE });
+    assert.equal(out.json.status, 'out_of_guide');
+    assert.equal(out.json.reason, 'outside');
+    assert.match(out.json.message, /recuadro/);
+    assert.equal(countPresent(), 0);
+
+    env.recognition.next = { faces: 1, match: '1007074776', similarity: 0.9, box: BOX_FAR };
+    assert.equal((await env.call('POST', url, { image_base64: JPEG_B64, guide: GUIDE })).json.reason, 'too_small');
+    assert.equal(countPresent(), 0);
+
+    env.recognition.next = { faces: 1, match: '1007074776', similarity: 0.9, box: BOX_INSIDE };
+    assert.equal((await env.call('POST', url, { image_base64: JPEG_B64, guide: GUIDE })).json.status, 'marked');
+    assert.equal(countPresent(), 1);
+
+    // Un guide mal formado se rechaza en vez de ignorarse en silencio
+    assert.equal((await env.call('POST', url, { image_base64: JPEG_B64, guide: { cx: 5 } })).status, 400);
+    void group;
+  } finally { await env.close(); }
+});
+
+test('face-check: informa si el rostro está bien encuadrado, sin guardar nada', async () => {
+  const env = await setup();
+  try {
+    const url = '/api/face-check';
+    env.recognition.next = { faces: 1, match: null, similarity: 0, box: BOX_INSIDE };
+    assert.deepEqual((await env.call('POST', url, { image_base64: JPEG_B64, guide: GUIDE })).json, { status: 'ok' });
+    assert.deepEqual(env.recognition.calls.recognize.at(-1), []); // no compara contra nadie
+
+    env.recognition.next = { faces: 1, match: null, similarity: 0, box: BOX_ASIDE };
+    assert.equal((await env.call('POST', url, { image_base64: JPEG_B64, guide: GUIDE })).json.status, 'out_of_guide');
+    env.recognition.next = { faces: 0 };
+    assert.equal((await env.call('POST', url, { image_base64: JPEG_B64, guide: GUIDE })).json.status, 'no_face');
+    env.recognition.next = { faces: 2 };
+    assert.equal((await env.call('POST', url, { image_base64: JPEG_B64, guide: GUIDE })).json.status, 'multiple_faces');
+    assert.equal((await env.call('POST', url, { guide: GUIDE })).status, 400);
+    assert.equal((await env.call('GET', '/api/students')).json.students.length, 0);
+  } finally { await env.close(); }
+});

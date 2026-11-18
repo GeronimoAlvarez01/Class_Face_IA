@@ -18,6 +18,9 @@ function loadConfig(env = process.env) {
     // En producción solo se toma asistencia el día de la clase; en pruebas conviene poder hacerlo cualquier día
     allowAnyDay: String(env.ALLOW_ANY_DAY || 'false') === 'true',
     maxBodyMb: Number(env.MAX_BODY_MB || 15),
+    // true = solo cuenta el rostro que está dentro del recuadro punteado. Poner FACE_GUIDE=false lo desactiva
+    // (por si el encuadre no coincidiera con la cámara de algún dispositivo).
+    faceGuide: String(env.FACE_GUIDE || 'true') !== 'false',
   };
 }
 

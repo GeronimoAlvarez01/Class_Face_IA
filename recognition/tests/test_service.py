@@ -35,7 +35,7 @@ class FakeEngine:
         r, g, b = image.getpixel((0, 0))
         base = np.random.default_rng(r * 65536 + g * 256 + b).normal(size=512)
         noise = np.random.default_rng(image.getpixel((1, 1))[0] + 1).normal(size=512)
-        return FaceResult(1, unit(base + 0.15 * noise))   # "otra foto de la misma persona" = mismo base, ruido distinto
+        return FaceResult(1, unit(base + 0.15 * noise), (0.1, 0.2, 0.6, 0.9))   # "otra foto de la misma persona" = mismo base, ruido distinto
 
 
 def png_b64(color, noise=0, width=8) -> str:
@@ -168,3 +168,14 @@ def test_validaciones_de_inscripcion(service):
     call("POST", "/enroll", {"student_id": "1007074776", "image_base64": png_b64(SAMUEL, 0), "replace": True})
     assert call("POST", "/enroll", {"student_id": "1007074776", "image_base64": png_b64(SAMUEL, 0)})[0] == 409
     assert call("POST", "/recognize", {"image_base64": png_b64(SAMUEL), "candidate_ids": "no-lista"})[0] == 422
+
+
+def test_recognize_devuelve_la_caja_del_rostro_y_sirve_solo_para_detectar(service):
+    call, _ = service
+    # Sin candidatos (lo que usa el backend para "hay un rostro bien encuadrado?"): no compara, pero da la caja
+    st, r = call("POST", "/recognize", {"image_base64": png_b64(SAMUEL, 0), "candidate_ids": []})
+    assert st == 200 and r["faces"] == 1 and r["match"] is None
+    assert r["box"] == [0.1, 0.2, 0.6, 0.9]
+    # Sin rostro no hay caja
+    r = call("POST", "/recognize", {"image_base64": png_b64((255, 255, 255)), "candidate_ids": []})[1]
+    assert r["faces"] == 0 and "box" not in r

@@ -14,6 +14,9 @@ from PIL import Image
 class FaceResult:
     faces: int                       # rostros significativos en la imagen
     embedding: np.ndarray | None     # solo si hay exactamente uno (vector L2-normalizado de 512)
+    # Caja del rostro único, normalizada 0..1 respecto a la imagen: (x1, y1, x2, y2). Permite al backend
+    # comprobar que el rostro está dentro del recuadro guía que ve el usuario.
+    box: tuple[float, float, float, float] | None = None
 
 
 class Engine(Protocol):
@@ -70,4 +73,7 @@ class FacenetEngine:
             face = out[0] if isinstance(out, (list, tuple)) else out
             emb = self._model(face.unsqueeze(0).to(self.device))
             emb = torch.nn.functional.normalize(emb, dim=1)[0].cpu().numpy().astype(np.float32)
-            return FaceResult(1, emb)
+            w, h = image.size
+            x1, y1, x2, y2 = (float(v) for v in box)
+            norm = (max(0.0, x1 / w), max(0.0, y1 / h), min(1.0, x2 / w), min(1.0, y2 / h))
+            return FaceResult(1, emb, norm)

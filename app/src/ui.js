@@ -269,15 +269,19 @@ export function FeedbackProvider({ children }) {
   const timer = useRef(null);
   const slide = useRef(new Animated.Value(0)).current;
 
-  const show = useCallback((message, tone = 'info') => {
+  // `duration` en ms; por defecto 3 s (5 s los errores). Un aviso nuevo reemplaza al anterior y reinicia el reloj.
+  const show = useCallback((message, tone = 'info', { duration } = {}) => {
     clearTimeout(timer.current);
-    setToast({ message, tone });
+    const id = Date.now() + Math.random();
+    setToast({ id, message, tone });
     slide.setValue(0);
     Animated.spring(slide, { toValue: 1, useNativeDriver: true, friction: 8 }).start();
     if (tone === 'success') haptic.success();
     if (tone === 'error') haptic.error();
-    timer.current = setTimeout(() => setToast(null), tone === 'error' ? 5000 : 3000);
+    // Solo cierra SU aviso: si ya salió otro, no lo toca
+    timer.current = setTimeout(() => setToast((t) => (t?.id === id ? null : t)), duration ?? (tone === 'error' ? 5000 : 3000));
   }, [slide]);
+  useEffect(() => () => clearTimeout(timer.current), []);
 
   const confirm = useCallback((opts) => new Promise((resolve) => setConfirmState({ ...opts, resolve })), []);
   const answer = (value) => { confirmState?.resolve(value); setConfirmState(null); };
@@ -395,20 +399,41 @@ export function ProgressBar({ value, color = 'successStrong', height = 8 }) {
   );
 }
 
-// ---------- avatar con foto (envía la clave de la API; en web la baja como blob) ----------
+// ---------- avatar con foto (envía la clave de la API) ----------
+// Un <Image> con encabezados no siempre los respeta en la tablet y deja el círculo vacío. Por eso la foto se baja con
+// fetch (que sí envía la clave) y se muestra ya descargada: en web como blob, en Android/iOS como imagen embebida.
+const nativePhotoCache = new Map(); // url -> data URI (se limita para no llenar la memoria con fotos grandes)
+const NATIVE_CACHE_MAX = 60;
+
+const blobToDataUri = (blob) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onloadend = () => resolve(reader.result);
+  reader.onerror = () => reject(reader.error);
+  reader.readAsDataURL(blob);
+});
+
 function useImageSource(url) {
-  const [src, setSrc] = useState(null);
+  const [src, setSrc] = useState(() => (url && nativePhotoCache.has(url) ? { uri: nativePhotoCache.get(url) } : null));
   useEffect(() => {
     if (!url) { setSrc(null); return undefined; }
-    if (Platform.OS !== 'web') { setSrc({ uri: url, headers: authHeaders() }); return undefined; }
     let cancelled = false;
     let objectUrl = null;
+    if (Platform.OS !== 'web' && nativePhotoCache.has(url)) { setSrc({ uri: nativePhotoCache.get(url) }); return undefined; }
+    setSrc(null);
     (async () => {
       try {
         const res = await fetch(url, { headers: authHeaders() });
         if (!res.ok) throw new Error('foto');
-        objectUrl = URL.createObjectURL(await res.blob());
-        if (!cancelled) setSrc({ uri: objectUrl });
+        const blob = await res.blob();
+        if (Platform.OS === 'web') {
+          objectUrl = URL.createObjectURL(blob);
+          if (!cancelled) setSrc({ uri: objectUrl });
+        } else {
+          const uri = await blobToDataUri(blob);
+          if (nativePhotoCache.size >= NATIVE_CACHE_MAX) nativePhotoCache.delete(nativePhotoCache.keys().next().value);
+          nativePhotoCache.set(url, uri);
+          if (!cancelled) setSrc({ uri });
+        }
       } catch {
         if (!cancelled) setSrc(null);
       }
@@ -423,13 +448,21 @@ const initials = (name = '') => name.split(' ').filter(Boolean).slice(0, 2).map(
 export function Avatar({ name, url, size = 48 }) {
   const { colors } = useTheme();
   const source = useImageSource(url);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => { setFailed(false); }, [source]);
   return (
     <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-      {source ? (
-        <Image source={source} style={{ width: size, height: size }} accessibilityLabel={`Foto de ${name}`} />
-      ) : (
-        <Text variant="label" color="primary">{initials(name)}</Text>
-      )}
+      {/* Las iniciales siempre quedan debajo: si la foto tarda o falla, nunca se ve un círculo vacío */}
+      <Text variant="label" color="primary">{initials(name)}</Text>
+      {source && !failed ? (
+        <Image
+          source={source}
+          onError={() => setFailed(true)}
+          style={{ position: 'absolute', top: 0, left: 0, width: size, height: size }}
+          resizeMode="cover"
+          accessibilityLabel={`Foto de ${name}`}
+        />
+      ) : null}
     </View>
   );
 }
