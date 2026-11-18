@@ -41,7 +41,11 @@ class FacenetEngine:
         if weights_path and Path(weights_path).exists():
             # Los pesos que guardó el notebook en Drive (state_dict; 8631 = clases originales de VGGFace2)
             model = InceptionResnetV1(pretrained=None, num_classes=8631)
-            model.load_state_dict(torch.load(weights_path, map_location="cpu"))
+            state = torch.load(weights_path, map_location="cpu")
+            # El checkpoint incluye la capa de clasificación (logits); el modelo sin classify no la tiene
+            # y para generar embeddings no se usa, así que se descarta.
+            state = {k: v for k, v in state.items() if not k.startswith("logits.")}
+            model.load_state_dict(state)
         else:
             model = InceptionResnetV1(pretrained="vggface2")  # descarga los pesos la primera vez
         self._model = model.eval().to(self.device)

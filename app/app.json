@@ -7,12 +7,29 @@
     "userInterfaceStyle": "automatic",
     "android": {
       "package": "co.edu.asistencia.facial",
-      "permissions": ["CAMERA"]
+      "permissions": [
+        "CAMERA"
+      ]
     },
-    "web": { "bundler": "metro" },
+    "web": {
+      "bundler": "metro"
+    },
     "plugins": [
-      ["expo-camera", { "cameraPermission": "La cámara se usa para reconocer a los estudiantes y tomar la asistencia." }],
-      ["expo-build-properties", { "android": { "usesCleartextTraffic": true } }]
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "La cámara se usa para reconocer a los estudiantes y tomar la asistencia."
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ],
+      "expo-status-bar"
     ]
   }
 }

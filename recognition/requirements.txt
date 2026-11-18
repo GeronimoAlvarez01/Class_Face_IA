@@ -2,6 +2,9 @@ starlette
 uvicorn
 numpy
 pillow
+# facenet-pytorch se instala con --no-deps, así que sus dependencias van aquí:
+requests
+tqdm
 torch
 torchvision
 # facenet-pytorch se instala APARTE y sin dependencias, para que no degrade el torch instalado:
