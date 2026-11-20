@@ -63,4 +63,18 @@ function describeError(err) {
   return { kind: 'error', title: 'No se pudo tomar la asistencia', message, autoCloseMs: null, cooldownMs: 0, actions: ['retry'] };
 }
 
-module.exports = { describeCheck, describeResult, describeError, PLACE_FACE, NO_FACE, MULTIPLE };
+// ---------- Marcar manualmente: búsqueda por documento ----------
+
+// Un documento: 4 a 20 letras o números (como exige el backend) y al menos un número, para no confundirlo con un nombre
+const DOCUMENT_QUERY = /^(?=.*\d)[A-Za-z0-9]{4,20}$/;
+const isDocumentQuery = (q) => DOCUMENT_QUERY.test(String(q ?? '').trim());
+
+/** Estudiante con ese documento exacto (sin distinguir mayúsculas), o null. */
+function findByDocument(students, doc) {
+  const d = String(doc ?? '').trim().toUpperCase();
+  return (students ?? []).find((s) => String(s.document).toUpperCase() === d) ?? null;
+}
+
+module.exports = {
+  describeCheck, describeResult, describeError, PLACE_FACE, NO_FACE, MULTIPLE, isDocumentQuery, findByDocument,
+};
