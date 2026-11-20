@@ -43,6 +43,7 @@ export default function ScanScreen({ groupId, onClose }) {
   const [manualError, setManualError] = useState(null);
   const [checking, setChecking] = useState(false);          // validando el documento en el servidor
   const [registering, setRegistering] = useState(null);     // { document }: formulario de registro abierto
+  const [deciding, setDeciding] = useState(false);          // una pregunta del flujo manual está abierta
   const [marked, setMarked] = useState(() => new Set()); // marcados en esta sesión de escaneo
   // Detector de rostros en el dispositivo (web): { status, message, ready } o null si no hay
   const [live, setLive] = useState(null);
@@ -122,10 +123,11 @@ export default function ScanScreen({ groupId, onClose }) {
 
   // Escáner automático: se detiene mientras haya una modal y se reanuda al cerrarla
   useEffect(() => {
-    if (!auto || modal || !session || manualOpen || registering) return undefined; // pausado mientras se marca a mano
+    // Pausado durante todo el flujo manual (búsqueda, preguntas y registro): si no, reconocería a la persona en medio
+    if (!auto || modal || !session || manualOpen || registering || deciding) return undefined;
     const id = setInterval(() => attempt(false), detecting ? LIVE_EVERY_MS : SCAN_EVERY_MS);
     return () => clearInterval(id);
-  }, [auto, modal, session, attempt, detecting, manualOpen, registering]);
+  }, [auto, modal, session, attempt, detecting, manualOpen, registering, deciding]);
 
   const markManually = async (student) => {
     try {
@@ -183,35 +185,45 @@ export default function ScanScreen({ groupId, onClose }) {
     } finally {
       setChecking(false);
     }
+    setDeciding(true);
     setManualOpen(false);
-    if (registered) {
+    try {
+      if (registered) {
+        const ok = await confirm({
+          title: 'No pertenece a este grupo',
+          message: `${registered.full_name} está registrado, pero no pertenece a este grupo. ¿Deseas agregarlo al grupo y marcar su asistencia?`,
+          confirmLabel: 'Agregar y marcar',
+        });
+        if (ok) await addToGroupAndMark(registered);
+        return;
+      }
       const ok = await confirm({
-        title: 'No pertenece a este grupo',
-        message: `${registered.full_name} está registrado, pero no pertenece a este grupo. ¿Deseas agregarlo al grupo y marcar su asistencia?`,
-        confirmLabel: 'Agregar y marcar',
+        title: 'El estudiante no existe',
+        message: `No hay ningún estudiante con el documento ${doc}. ¿Deseas registrarlo?`,
+        confirmLabel: 'Registrarlo',
       });
-      if (ok) await addToGroupAndMark(registered);
-      return;
+      if (ok) setRegistering({ document: doc });
+    } finally {
+      setDeciding(false);
     }
-    const ok = await confirm({
-      title: 'El estudiante no existe',
-      message: `No hay ningún estudiante con el documento ${doc}. ¿Deseas registrarlo?`,
-      confirmLabel: 'Registrarlo',
-    });
-    if (ok) setRegistering({ document: doc });
   };
 
   /** Tras registrarlo: si ya lo inscribieron en este grupo se marca; si no, se pregunta. */
   const onRegistered = async (student, groupIds = []) => {
     if (!student) return;
-    if (groupIds.includes(groupId)) { await addToGroupAndMark(student); return; }
-    const ok = await confirm({
-      title: 'Agregar estudiante al grupo',
-      message: `¿Deseas agregar a ${student.full_name} a ${grid.data.group.label} y marcar su asistencia de hoy?`,
-      confirmLabel: 'Agregar y marcar',
-    });
-    if (ok) await addToGroupAndMark(student);
-    else setSearch('');
+    setDeciding(true); // antes de que el formulario se cierre: el escáner no debe reanudarse con la pregunta abierta
+    try {
+      if (groupIds.includes(groupId)) { await addToGroupAndMark(student); return; }
+      const ok = await confirm({
+        title: 'Agregar estudiante al grupo',
+        message: `¿Deseas agregar a ${student.full_name} a ${grid.data.group.label} y marcar su asistencia de hoy?`,
+        confirmLabel: 'Agregar y marcar',
+      });
+      if (ok) await addToGroupAndMark(student);
+      else setSearch('');
+    } finally {
+      setDeciding(false);
+    }
   };
 
   // ---------- estados previos a la cámara ----------
