@@ -4,6 +4,7 @@ const { Router, HttpError, created, binary } = require('./http');
 const { tx } = require('./db');
 const { ValidationError, buildSchedule, weekdayLabel, shortDateLabel } = require('./schedule');
 const { parseGuide, checkFaceInGuide, GUIDE_MESSAGES } = require('./guide');
+const { TraceStore } = require('./trace');
 
 const DOC_RE = /^[A-Za-z0-9]{4,20}$/;
 const STATUSES = new Set(['present', 'absent']);
@@ -46,6 +47,7 @@ function buildApi({ db, cfg, recognition, clock }) {
   const router = new Router();
   const photosDir = path.join(cfg.dataDir, 'photos');
   fs.mkdirSync(photosDir, { recursive: true });
+  const traces = new TraceStore(cfg.traceBuffer); // modo demo: solo se llena con DEMO_TRACE=1
 
   // ---------- helpers de acceso a datos ----------
 
@@ -83,10 +85,33 @@ function buildApi({ db, cfg, recognition, clock }) {
     return rel;
   }
 
+  // ---------- modo demo (Laboratorio IA) ----------
+
+  /** Inscribe en el servicio de reconocimiento y, en modo demo, deja el recorrido (también si la foto fue rechazada). */
+  async function enrollTraced(student, img, replaced) {
+    const context = { document: student.document, full_name: student.full_name, replaced };
+    const faces = (tr) => tr?.detection?.faces_counted ?? 0;
+    let out;
+    try {
+      out = await recognition.enroll(student.document, img.b64);
+    } catch (err) {
+      if (cfg.demoTrace && err.trace) {
+        traces.add({ kind: 'enroll', faces: faces(err.trace), context,
+          decision: { status: 'rejected', message: err.message }, trace: err.trace });
+      }
+      throw err;
+    }
+    if (cfg.demoTrace && out?.trace) {
+      traces.add({ kind: 'enroll', faces: faces(out.trace), context, decision: { status: 'enrolled' }, trace: out.trace });
+    }
+    return out;
+  }
+
   // ---------- salud ----------
 
   router.add('GET', '/api/health', () => ({
     ok: true, today: clock.today(), recognition: cfg.recognitionMode, allow_any_day: cfg.allowAnyDay,
+    demo_trace: cfg.demoTrace === true,
   }));
 
   // =====================================================================
@@ -156,7 +181,7 @@ function buildApi({ db, cfg, recognition, clock }) {
       throw new HttpError(409, 'Ya existe un estudiante con ese documento');
     }
 
-    await recognition.enroll(document, img.b64);
+    await enrollTraced({ document, full_name: fullName }, img, false);
     const rel = savePhoto(document, img);
     try {
       const id = tx(db, () => {
@@ -194,7 +219,7 @@ function buildApi({ db, cfg, recognition, clock }) {
     let rel = s.photo_path;
     if (body.photo_base64) {
       const img = decodeImage(body.photo_base64, 'photo_base64');
-      await recognition.enroll(s.document, img.b64); // reemplaza el embedding anterior
+      await enrollTraced({ document: s.document, full_name: fullName }, img, true); // reemplaza el embedding anterior
       rel = savePhoto(s.document, img);
     }
     db.prepare('UPDATE students SET full_name = ?, photo_path = ? WHERE id = ?').run(fullName, rel, s.id);
@@ -366,26 +391,49 @@ function buildApi({ db, cfg, recognition, clock }) {
 
     const result = await recognition.recognize(img.b64, members.map((m) => m.document));
     const similarity = result.similarity ?? null;
-    if (!result.faces) return { status: 'no_face', message: 'No se detectó ningún rostro' };
+
+    // Modo demo: guarda el recorrido con el nombre de cada candidato y lo que Node decidió (recuadro, asistencia)
+    const finish = (response, fit = null) => {
+      if (cfg.demoTrace && result.trace) {
+        const names = new Map(members.map((m) => [m.document, m.full_name]));
+        const tr = result.trace;
+        if (tr.comparison) {
+          tr.comparison.scores = tr.comparison.scores.map((sc) => ({ ...sc, full_name: names.get(sc.student_id) ?? null }));
+        }
+        traces.add({
+          kind: 'recognize', faces: result.faces ?? 0,
+          context: { group: groupLabel(getGroup(session.group_id)), session_date: session.session_date, members: members.length },
+          decision: {
+            status: response.status, message: response.message, reason: response.reason, similarity,
+            student: response.student ? { document: response.student.document, full_name: response.student.full_name } : undefined,
+            guide: guide ? { ...guide, ok: fit ? fit.ok : null, reason: fit?.reason } : null,
+          },
+          trace: tr,
+        });
+      }
+      return response;
+    };
+
+    if (!result.faces) return finish({ status: 'no_face', message: 'No se detectó ningún rostro' });
     // Con varios rostros no sabemos a cuál se enfocó: no se marca nada (una falsa asistencia es peor que repetir la foto)
-    if (result.faces > 1) return { status: 'multiple_faces', message: 'Aparece más de una persona; enfoque a un solo estudiante' };
+    if (result.faces > 1) return finish({ status: 'multiple_faces', message: 'Aparece más de una persona; enfoque a un solo estudiante' });
     // Solo cuenta el rostro que está dentro del recuadro: se comprueba ANTES de buscar al estudiante o marcar nada
     const fit = checkFaceInGuide(result.box, guide);
-    if (!fit.ok) return { status: 'out_of_guide', reason: fit.reason, message: GUIDE_MESSAGES[fit.reason] };
+    if (!fit.ok) return finish({ status: 'out_of_guide', reason: fit.reason, message: GUIDE_MESSAGES[fit.reason] }, fit);
 
     const student = members.find((m) => m.document === result.match);
-    if (!student) return { status: 'unknown', similarity };
+    if (!student) return finish({ status: 'unknown', similarity }, fit);
 
     const previous = db.prepare('SELECT status FROM attendance WHERE session_id = ? AND student_id = ?').get(session.id, student.id);
     if (previous?.status === 'present') {
-      return { status: 'already_present', student: studentView(student), similarity };
+      return finish({ status: 'already_present', student: studentView(student), similarity }, fit);
     }
     db.prepare(`INSERT INTO attendance (session_id, student_id, status, source, similarity, marked_at)
                 VALUES (?, ?, 'present', 'auto', ?, ?)
                 ON CONFLICT (session_id, student_id) DO UPDATE SET status = 'present', source = 'auto',
                   similarity = excluded.similarity, marked_at = excluded.marked_at`)
       .run(session.id, student.id, similarity, new Date().toISOString());
-    return { status: 'marked', student: studentView(student), similarity, ...(result.mock ? { mock: true } : {}) };
+    return finish({ status: 'marked', student: studentView(student), similarity, ...(result.mock ? { mock: true } : {}) }, fit);
   });
 
   // =====================================================================
@@ -396,12 +444,29 @@ function buildApi({ db, cfg, recognition, clock }) {
   router.add('POST', '/api/face-check', async ({ body }) => {
     const img = decodeImage(body.image_base64, 'image_base64');
     const guide = cfg.faceGuide === false ? null : parseGuide(body.guide);
-    const result = await recognition.recognize(img.b64, []);
+    const result = await recognition.recognize(img.b64, [], { trace: false }); // no es un reconocimiento real: sin trace
     if (!result.faces) return { status: 'no_face', message: 'No se detectó ningún rostro' };
     if (result.faces > 1) return { status: 'multiple_faces', message: 'Aparece más de una persona; debe verse un solo rostro' };
     const fit = checkFaceInGuide(result.box, guide);
     if (!fit.ok) return { status: 'out_of_guide', reason: fit.reason, message: GUIDE_MESSAGES[fit.reason] };
     return { status: 'ok' };
+  });
+
+  // =====================================================================
+  // Laboratorio IA (modo demo): el visor consulta cada ~300 ms y anima lo que llega
+  //   GET /api/trace                 -> solo fija el cursor: { demo, last_id, items: [] }
+  //   GET /api/trace?since=N         -> recorridos con id > N, del más viejo al más nuevo (máx. `limit`, 5 por defecto)
+  //   ...&faces=1                    -> omite los cuadros sin rostro (el escáner automático manda muchos)
+  // =====================================================================
+
+  router.add('GET', '/api/trace', ({ query }) => {
+    if (!cfg.demoTrace) return { demo: false, last_id: 0, items: [] };
+    if (query.since === undefined) return { demo: true, last_id: traces.seq, items: [] };
+    const since = Number(query.since);
+    if (!Number.isInteger(since) || since < 0) throw new HttpError(400, '"since" debe ser un entero >= 0');
+    const limit = Math.min(Math.max(Math.trunc(Number(query.limit)) || 5, 1), 20);
+    const { lastId, items } = traces.since(since, { limit, onlyFaces: query.faces === '1' });
+    return { demo: true, last_id: lastId, items };
   });
 
   return router;

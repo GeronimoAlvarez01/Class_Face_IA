@@ -21,6 +21,10 @@ function loadConfig(env = process.env) {
     // true = solo cuenta el rostro que está dentro del recuadro punteado. Poner FACE_GUIDE=false lo desactiva
     // (por si el encuadre no coincidiera con la cámara de algún dispositivo).
     faceGuide: String(env.FACE_GUIDE || 'true') !== 'false',
+    // Modo demo "Laboratorio IA": guarda en memoria los últimos recorridos para el visor. Apagado por defecto.
+    // Poner también DEMO_TRACE=1 en el servicio Python (es quien genera los datos de la red).
+    demoTrace: ['1', 'true', 'yes', 'on'].includes(String(env.DEMO_TRACE || '').trim().toLowerCase()),
+    traceBuffer: Number(env.TRACE_BUFFER || 20),
   };
 }
 
