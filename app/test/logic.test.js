@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const dates = require('../src/lib/dates');
 const grid = require('../src/lib/grid');
-const { describeCheck, describeResult, describeError } = require('../src/lib/scan');
+const { describeCheck, describeResult, describeError, isDocumentQuery, findByDocument } = require('../src/lib/scan');
 
 // ---------- fechas ----------
 
@@ -158,4 +158,22 @@ test('escáner: solo se reconoce cuando el rostro está bien ubicado en el óval
   assert.equal(describeCheck({ status: 'no_face' }).message, 'No veo ningún rostro. Ubica el rostro en el óvalo.');
   assert.equal(describeCheck({ status: 'multiple_faces' }).message, 'Hay más de una persona. Solo debe verse un rostro.');
   assert.equal(describeCheck(undefined).ready, false);
+});
+
+test('marcar manualmente: solo un documento completo se valida (un nombre no)', () => {
+  assert.equal(isDocumentQuery('1007074776'), true);
+  assert.equal(isDocumentQuery(' CE12345 '), true);
+  assert.equal(isDocumentQuery('Samuel'), false);       // nombre: no se ofrece registrar
+  assert.equal(isDocumentQuery('Ana María'), false);
+  assert.equal(isDocumentQuery('123'), false);          // muy corto
+  assert.equal(isDocumentQuery('12345678901234567890X'), false); // muy largo
+  assert.equal(isDocumentQuery(''), false);
+});
+
+test('marcar manualmente: busca por documento exacto, sin distinguir mayúsculas', () => {
+  const list = [{ id: 1, document: '1007074776' }, { id: 2, document: 'CE12345' }];
+  assert.equal(findByDocument(list, '1007074776').id, 1);
+  assert.equal(findByDocument(list, ' ce12345 ').id, 2);
+  assert.equal(findByDocument(list, '100707477'), null); // parcial no cuenta
+  assert.equal(findByDocument(undefined, '1'), null);
 });

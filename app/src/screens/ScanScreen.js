@@ -8,9 +8,10 @@ import {
 } from '../ui';
 import { CameraBox, FaceGuide } from '../components/CameraBox';
 import { ResultModal } from '../components/ResultModal';
+import { StudentForm } from '../components/StudentForm';
 import { radius, space, useTheme } from '../theme';
 import { isPresent, pickScanSession } from '../lib/grid';
-import { describeCheck, describeError, describeResult } from '../lib/scan';
+import { describeCheck, describeError, describeResult, findByDocument, isDocumentQuery } from '../lib/scan';
 import { longLabel } from '../lib/dates';
 
 const SCAN_EVERY_MS = 1500; // sin detector local: revisa el encuadre en el servidor cada 1,5 s mientras no haya una modal
@@ -23,7 +24,7 @@ export default function ScanScreen({ groupId, onClose }) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const { toast } = useFeedback();
+  const { toast, confirm } = useFeedback();
   const { health } = useApp();
   const wide = width >= 900;
 
@@ -40,6 +41,9 @@ export default function ScanScreen({ groupId, onClose }) {
   const [manualOpen, setManualOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [manualError, setManualError] = useState(null);
+  const [checking, setChecking] = useState(false);          // validando el documento en el servidor
+  const [registering, setRegistering] = useState(null);     // { document }: formulario de registro abierto
+  const [deciding, setDeciding] = useState(false);          // una pregunta del flujo manual está abierta
   const [marked, setMarked] = useState(() => new Set()); // marcados en esta sesión de escaneo
   // Detector de rostros en el dispositivo (web): { status, message, ready } o null si no hay
   const [live, setLive] = useState(null);
@@ -119,10 +123,11 @@ export default function ScanScreen({ groupId, onClose }) {
 
   // Escáner automático: se detiene mientras haya una modal y se reanuda al cerrarla
   useEffect(() => {
-    if (!auto || modal || !session) return undefined;
+    // Pausado durante todo el flujo manual (búsqueda, preguntas y registro): si no, reconocería a la persona en medio
+    if (!auto || modal || !session || manualOpen || registering || deciding) return undefined;
     const id = setInterval(() => attempt(false), detecting ? LIVE_EVERY_MS : SCAN_EVERY_MS);
     return () => clearInterval(id);
-  }, [auto, modal, session, attempt, detecting]);
+  }, [auto, modal, session, attempt, detecting, manualOpen, registering, deciding]);
 
   const markManually = async (student) => {
     try {
@@ -133,6 +138,91 @@ export default function ScanScreen({ groupId, onClose }) {
       toast(`Asistencia de ${student.full_name} registrada`, 'success');
     } catch (e) {
       setManualError(e.message);
+    }
+  };
+
+  /** Inscribe al estudiante en este grupo (si ya lo está, no pasa nada) y marca su asistencia de hoy. */
+  const addToGroupAndMark = async (student) => {
+    try {
+      await api.groups.addStudent(groupId, student.id);
+      await api.grid.save(groupId, [{ session_id: session.id, student_id: student.id, status: 'present' }]);
+      markLocal(student.id);
+      setSearch('');
+      toast(`${student.full_name} quedó en el grupo y con asistencia`, 'success');
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      grid.reload(); // el grupo tiene un estudiante más
+    }
+  };
+
+  /**
+   * Botón "Buscar" de Marcar manualmente: valida el documento escrito.
+   *  - del grupo y sin asistencia -> se marca · del grupo y ya presente -> aviso
+   *  - registrado pero de otro grupo -> ¿agregarlo al grupo y marcar su asistencia?
+   *  - no existe -> ¿deseas registrarlo? -> formulario -> ¿agregarlo al grupo? -> se marca su asistencia
+   */
+  const validateDocument = async () => {
+    const doc = search.trim();
+    if (!isDocumentQuery(doc)) {
+      setManualError('Escribe el documento completo (4 a 20 letras o números) para validarlo.');
+      return;
+    }
+    setManualError(null);
+    const member = findByDocument(students, doc);
+    if (member) {
+      if (presentIds.has(member.id)) toast(`${member.full_name} ya tiene asistencia`, 'info');
+      else await markManually(member);
+      return;
+    }
+    let registered;
+    setChecking(true);
+    try {
+      registered = findByDocument(await api.students.list(), doc);
+    } catch (e) {
+      setManualError(e.message);
+      return;
+    } finally {
+      setChecking(false);
+    }
+    setDeciding(true);
+    setManualOpen(false);
+    try {
+      if (registered) {
+        const ok = await confirm({
+          title: 'No pertenece a este grupo',
+          message: `${registered.full_name} está registrado, pero no pertenece a este grupo. ¿Deseas agregarlo al grupo y marcar su asistencia?`,
+          confirmLabel: 'Agregar y marcar',
+        });
+        if (ok) await addToGroupAndMark(registered);
+        return;
+      }
+      const ok = await confirm({
+        title: 'El estudiante no existe',
+        message: `No hay ningún estudiante con el documento ${doc}. ¿Deseas registrarlo?`,
+        confirmLabel: 'Registrarlo',
+      });
+      if (ok) setRegistering({ document: doc });
+    } finally {
+      setDeciding(false);
+    }
+  };
+
+  /** Tras registrarlo: si ya lo inscribieron en este grupo se marca; si no, se pregunta. */
+  const onRegistered = async (student, groupIds = []) => {
+    if (!student) return;
+    setDeciding(true); // antes de que el formulario se cierre: el escáner no debe reanudarse con la pregunta abierta
+    try {
+      if (groupIds.includes(groupId)) { await addToGroupAndMark(student); return; }
+      const ok = await confirm({
+        title: 'Agregar estudiante al grupo',
+        message: `¿Deseas agregar a ${student.full_name} a ${grid.data.group.label} y marcar su asistencia de hoy?`,
+        confirmLabel: 'Agregar y marcar',
+      });
+      if (ok) await addToGroupAndMark(student);
+      else setSearch('');
+    } finally {
+      setDeciding(false);
     }
   };
 
@@ -195,6 +285,8 @@ export default function ScanScreen({ groupId, onClose }) {
 
   return (
     <View style={{ flex: 1, flexDirection: 'row', backgroundColor: '#000' }}>
+      {/* Mientras se registra a un estudiante, el formulario usa la cámara: la del escáner se apaga */}
+      {registering ? <View style={{ flex: 1, backgroundColor: '#000' }} /> : (
       <CameraBox
         ref={camRef}
         facing={facing}
@@ -258,6 +350,7 @@ export default function ScanScreen({ groupId, onClose }) {
           </>
         )}
       />
+      )}
       {wide ? panel : null}
 
       <ResultModal
@@ -269,8 +362,20 @@ export default function ScanScreen({ groupId, onClose }) {
 
       <Sheet visible={manualOpen} onClose={() => { setManualOpen(false); setManualError(null); }} title="Marcar asistencia manualmente">
         <InlineError message={manualError} />
-        <Field label="Buscar estudiante" value={search} onChangeText={setSearch} placeholder="Nombre o documento" />
-        {filtered.length === 0 ? <Text color="textMuted">{missing.length === 0 ? 'Todos los estudiantes ya tienen asistencia.' : 'Sin resultados.'}</Text> : null}
+        <Field
+          label="Buscar estudiante"
+          value={search}
+          onChangeText={(t) => { setSearch(t); setManualError(null); }}
+          placeholder="Nombre o documento"
+          returnKeyType="search"
+          onSubmitEditing={validateDocument}
+        />
+        <Button label="Buscar documento" icon="search" variant="secondary" loading={checking} disabled={!search.trim()} onPress={validateDocument} />
+        {filtered.length === 0 ? (
+          <Text color="textMuted">
+            {missing.length === 0 && !search.trim() ? 'Todos los estudiantes ya tienen asistencia.' : 'Sin resultados. Si es un estudiante nuevo, escribe su documento y toca Buscar documento.'}
+          </Text>
+        ) : null}
         {filtered.map((st) => (
           <Pressable
             key={st.id}
@@ -288,6 +393,13 @@ export default function ScanScreen({ groupId, onClose }) {
           </Pressable>
         ))}
       </Sheet>
+
+      <StudentForm
+        visible={!!registering}
+        defaultDocument={registering?.document}
+        onClose={() => setRegistering(null)}
+        onSaved={onRegistered}
+      />
     </View>
   );
 }

@@ -148,8 +148,10 @@ function CaptureModal({ visible, onClose, onCaptured }) {
  *  - Crear: documento, nombre, foto de frente, grupos y consentimiento. La foto se valida de inmediato:
  *    si no tiene un rostro claro el servidor responde y el administrador la repite en el momento.
  *  - Editar: solo nombre y (opcionalmente) reemplazar la foto.
+ * `defaultDocument` precarga el documento al crear; `onSaved(estudiante, groupIds)` recibe el estudiante creado y los
+ * grupos elegidos (al editar, el estudiante actualizado).
  */
-export function StudentForm({ visible, onClose, student, defaultGroupIds = [], onSaved }) {
+export function StudentForm({ visible, onClose, student, defaultGroupIds = [], defaultDocument = '', onSaved }) {
   const { colors } = useTheme();
   const { toast } = useFeedback();
   const { groups, reloadGroups } = useApp();
@@ -166,7 +168,7 @@ export function StudentForm({ visible, onClose, student, defaultGroupIds = [], o
 
   useEffect(() => {
     if (!visible) return;
-    setDocument(student?.document ?? '');
+    setDocument(student?.document ?? defaultDocument);
     setFullName(student?.full_name ?? '');
     setPhoto(null);
     setGroupIds(defaultGroupIds);
@@ -189,18 +191,19 @@ export function StudentForm({ visible, onClose, student, defaultGroupIds = [], o
     if (!validate()) { haptic.error(); return; }
     setSaving(true);
     try {
+      let saved;
       if (editing) {
-        await api.students.update(student.id, { full_name: fullName.trim(), ...(photo ? { photo_base64: photo.base64 } : {}) });
+        saved = await api.students.update(student.id, { full_name: fullName.trim(), ...(photo ? { photo_base64: photo.base64 } : {}) });
         toast('Estudiante actualizado', 'success');
       } else {
-        await api.students.create({
+        saved = await api.students.create({
           document: document.trim(), full_name: fullName.trim(), consent: true, photo_base64: photo.base64, group_ids: groupIds,
         });
         toast(`${fullName.trim()} quedó registrado`, 'success');
       }
       bumpPhotos();
       reloadGroups();
-      onSaved?.();
+      onSaved?.(saved, groupIds);
       onClose();
     } catch (err) {
       // 422 = el servicio no encontró un rostro utilizable; 409 = documento repetido
