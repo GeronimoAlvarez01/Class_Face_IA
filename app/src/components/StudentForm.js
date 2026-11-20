@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Image, Modal, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api, bumpPhotos, photoUrl } from '../api';
@@ -10,7 +10,9 @@ import { radius, space, useTheme } from '../theme';
 
 const DOC_RE = /^[A-Za-z0-9]{4,20}$/;
 
-const CHECK_EVERY_MS = 1000;       // un cuadro de prueba por segundo mientras no haya foto
+const CHECK_EVERY_MS = 1000;       // sin detector local: un cuadro de prueba por segundo mientras no haya foto
+const TICK_MS = 300;               // con detector local: solo mira si ya está listo (no toma fotos hasta entonces)
+const RETRY_MS = 1500;             // si el servidor no confirma la foto, espera antes de volver a intentar
 const SUCCESS_MODAL = {
   kind: 'success', title: 'Foto registrada correctamente', message: 'El rostro quedó bien encuadrado.', autoCloseMs: 2200,
 };
@@ -31,30 +33,50 @@ function CaptureModal({ visible, onClose, onCaptured }) {
   const [problem, setProblem] = useState(false);
   const [result, setResult] = useState(null);   // la modal "Foto registrada correctamente"
   const [photo, setPhoto] = useState(null);
+  // Detector de rostros en el dispositivo (web): { status, message, ready } o null si no hay
+  const [live, setLive] = useState(null);
+  const liveRef = useRef(null);
+  const nextTryAt = useRef(0);
+  const onFace = useCallback((s) => {
+    liveRef.current = s;
+    setLive(s);
+    if (s && !s.ready) setProblem(false); // se movió: el aviso vuelve a ser el del detector
+  }, []);
 
   useEffect(() => {
     if (!visible) return undefined;
     doneRef.current = false;
     busyRef.current = false;
+    nextTryAt.current = 0;
     setResult(null);
     setPhoto(null);
     setProblem(false);
     setHint('Ubica el rostro en el óvalo.');
 
     const tick = async () => {
-      if (busyRef.current || doneRef.current || !camRef.current?.isReady()) return;
+      if (busyRef.current || doneRef.current || !camRef.current?.isReady() || Date.now() < nextTryAt.current) return;
+      const local = !!liveRef.current; // hay detector local
+      if (local && !liveRef.current.ready) return; // no se toma ninguna foto hasta que el rostro esté en el óvalo
       busyRef.current = true;
       try {
-        // 1) cuadro de prueba, barato
-        const probe = await camRef.current.capture(0.4);
-        const first = await api.faceCheck(probe.base64, probe.guide);
-        if (doneRef.current) return;
-        if (first.status !== 'ok') { setProblem(true); setHint(first.message ?? 'Ubica el rostro en el óvalo.'); return; }
+        if (!local) {
+          // 1) sin detector local: cuadro de prueba, barato, revisado en el servidor
+          nextTryAt.current = Date.now() + CHECK_EVERY_MS;
+          const probe = await camRef.current.capture(0.4);
+          const first = await api.faceCheck(probe.base64, probe.guide);
+          if (doneRef.current) return;
+          if (first.status !== 'ok') { setProblem(true); setHint(first.message ?? 'Ubica el rostro en el óvalo.'); return; }
+        }
         // 2) foto buena (es la referencia de por vida del estudiante) y se comprueba ELLA, no solo el cuadro de prueba
         const final = await camRef.current.capture(0.8);
         const second = await api.faceCheck(final.base64, final.guide);
         if (doneRef.current) return;
-        if (second.status !== 'ok') { setProblem(true); setHint(second.message ?? 'Mantén el rostro quieto dentro del óvalo.'); return; }
+        if (second.status !== 'ok') {
+          setProblem(true);
+          setHint(second.message ?? 'Mantén el rostro quieto dentro del óvalo.');
+          nextTryAt.current = Date.now() + RETRY_MS; // el servidor vio otra cosa: no insistir enseguida
+          return;
+        }
         doneRef.current = true;
         setProblem(false);
         setPhoto(final);
@@ -62,12 +84,13 @@ function CaptureModal({ visible, onClose, onCaptured }) {
       } catch (e) {
         setProblem(true);
         setHint(e.status === 0 ? 'No hay conexión con el servidor.' : e.message || 'No se pudo revisar la foto.');
+        nextTryAt.current = Date.now() + RETRY_MS;
       } finally {
         busyRef.current = false;
       }
     };
 
-    const id = setInterval(tick, CHECK_EVERY_MS);
+    const id = setInterval(tick, TICK_MS);
     return () => { clearInterval(id); doneRef.current = true; };
   }, [visible]);
 
@@ -79,7 +102,11 @@ function CaptureModal({ visible, onClose, onCaptured }) {
   };
 
   const ok = !!result;
-  const guideColor = ok ? colors.successStrong : problem ? '#FBBF24' : 'rgba(255,255,255,0.85)';
+  // Con detector local, mientras el rostro no esté listo el aviso es el suyo (acércate, aléjate, ubica el rostro...)
+  const liveProblem = !!live && !live.ready && live.status !== 'ok' && live.status !== 'loading';
+  const showProblem = live && !live.ready ? liveProblem : problem;
+  const shownHint = live && (!live.ready || !problem) ? live.message : hint;
+  const guideColor = ok ? colors.successStrong : showProblem ? '#FBBF24' : 'rgba(255,255,255,0.85)';
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose} statusBarTranslucent>
@@ -88,6 +115,7 @@ function CaptureModal({ visible, onClose, onCaptured }) {
           ref={camRef}
           facing={facing}
           style={{ flex: 1, borderRadius: 0 }}
+          onFace={onFace}
           overlay={(
             <>
               <FaceGuide color={guideColor} solid={ok} />
@@ -101,8 +129,8 @@ function CaptureModal({ visible, onClose, onCaptured }) {
                   accessibilityLiveRegion="polite"
                   style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: radius.pill, paddingHorizontal: space.lg, paddingVertical: space.md, maxWidth: '90%' }}
                 >
-                  <Icon name={ok ? 'checkmark-circle' : problem ? 'alert-circle' : 'scan'} size={20} color={ok ? 'success' : problem ? '#FBBF24' : '#FFFFFF'} />
-                  <Text color="#FFFFFF" style={{ flexShrink: 1 }}>{ok ? 'Rostro encuadrado' : hint}</Text>
+                  <Icon name={ok ? 'checkmark-circle' : showProblem ? 'alert-circle' : 'scan'} size={20} color={ok ? 'success' : showProblem ? '#FBBF24' : '#FFFFFF'} />
+                  <Text color="#FFFFFF" style={{ flexShrink: 1 }}>{ok ? 'Rostro encuadrado' : shownHint}</Text>
                 </View>
               </View>
             </>

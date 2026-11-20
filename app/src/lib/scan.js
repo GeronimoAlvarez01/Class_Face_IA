@@ -63,4 +63,4 @@ function describeError(err) {
   return { kind: 'error', title: 'No se pudo tomar la asistencia', message, autoCloseMs: null, cooldownMs: 0, actions: ['retry'] };
 }
 
-module.exports = { describeCheck, describeResult, describeError };
+module.exports = { describeCheck, describeResult, describeError, PLACE_FACE, NO_FACE, MULTIPLE };
