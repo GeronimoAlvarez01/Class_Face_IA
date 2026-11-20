@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import { ScrollView, View, useWindowDimensions } from 'react-native';
 import { api } from '../api';
 import { useApp } from '../context';
 import {
@@ -14,6 +14,7 @@ const QUICK_WEEKS = [14, 16, 18];
 /** Admin 2: define el día y las fechas de clase del grupo. Una clase por semana, el mismo día. */
 export default function ScheduleScreen() {
   const { colors } = useTheme();
+  const compact = useWindowDimensions().width < 600; // teléfono
   const { toast } = useFeedback();
   const { health, groups, groupId, setGroupId, reloadGroups, goTo } = useApp();
   const today = health?.today;
@@ -121,9 +122,10 @@ export default function ScheduleScreen() {
                 </View>
               </View>
             </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, backgroundColor: colors.primarySoft, borderRadius: radius.md, padding: space.md }}>
+            {/* Teléfono: la etiqueta arriba y la descripción debajo con todo el ancho */}
+            <View style={{ flexDirection: compact ? 'column' : 'row', alignItems: compact ? 'flex-start' : 'center', gap: space.sm, backgroundColor: colors.primarySoft, borderRadius: radius.md, padding: space.md }}>
               <Chip tone="primary" icon="repeat" label={`Todos los ${dayPlural}`} />
-              <Text variant="small" color="primary" style={{ flex: 1 }}>{weeks} clases: del {rows.length ? longLabel(rows[0].session_date) : ''} al {rows.length ? longLabel(rows[rows.length - 1].session_date) : ''}.</Text>
+              <Text variant="small" color="primary" style={compact ? null : { flex: 1 }}>{weeks} clases: del {rows.length ? longLabel(rows[0].session_date) : ''} al {rows.length ? longLabel(rows[rows.length - 1].session_date) : ''}.</Text>
             </View>
           </Card>
 
@@ -145,9 +147,12 @@ export default function ScheduleScreen() {
                     </View>
                     <Chip label={tag.label} tone={tag.tone} />
                     {r.moved ? <Chip label="Movida" tone="warning" icon="swap-horizontal" /> : null}
+                    {/* A la derecha (también cuando baja de línea en el teléfono); borde rojo para que se vea en modo oscuro */}
                     <Button
                       label={r.cancelled ? 'Restablecer' : 'Cancelar clase'}
+                      icon={r.cancelled ? 'refresh' : 'close-circle'}
                       variant={r.cancelled ? 'soft' : 'dangerSoft'}
+                      style={{ marginLeft: 'auto', ...(r.cancelled ? null : { borderColor: colors.danger }) }}
                       onPress={() => setException(r.week_number, { cancelled: r.cancelled ? undefined : true })}
                     />
                   </View>

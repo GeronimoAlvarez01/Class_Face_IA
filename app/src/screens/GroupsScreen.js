@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
+import { Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
 import { api, photoUrl } from '../api';
 import { useApp } from '../context';
 import {
@@ -118,6 +118,7 @@ function AddExistingSheet({ visible, onClose, group, memberIds, onAdded }) {
 
 function GroupDetail({ group, onBack }) {
   const { colors } = useTheme();
+  const compact = useWindowDimensions().width < 600; // teléfono
   const { toast, confirm } = useFeedback();
   const { reloadGroups, setGroupId, goTo } = useApp();
   const [version, setVersion] = useState(0);
@@ -150,12 +151,25 @@ function GroupDetail({ group, onBack }) {
   const list = members.data ?? [];
   return (
     <ScrollView contentContainerStyle={{ padding: space.xl, paddingBottom: 80, gap: space.lg }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
-        <IconButton icon="chevron-back" label="Volver a grupos" filled onPress={onBack} />
-        <Text variant="title" style={{ flex: 1 }} accessibilityRole="header">{group.label}</Text>
-        <Button label="Editar" icon="create" variant="secondary" onPress={() => setEditGroup(true)} />
-        <IconButton icon="trash" label="Eliminar grupo" tone="danger" filled onPress={deleteGroup} />
-      </View>
+      {compact ? (
+        // Teléfono: acciones arriba y el nombre del grupo con todo el ancho
+        <View style={{ gap: space.md }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+            <IconButton icon="chevron-back" label="Volver a grupos" filled onPress={onBack} />
+            <View style={{ flex: 1 }} />
+            <Button label="Editar" icon="create" variant="secondary" onPress={() => setEditGroup(true)} />
+            <IconButton icon="trash" label="Eliminar grupo" tone="danger" filled onPress={deleteGroup} />
+          </View>
+          <Text variant="title" accessibilityRole="header">{group.label}</Text>
+        </View>
+      ) : (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+          <IconButton icon="chevron-back" label="Volver a grupos" filled onPress={onBack} />
+          <Text variant="title" style={{ flex: 1 }} accessibilityRole="header">{group.label}</Text>
+          <Button label="Editar" icon="create" variant="secondary" onPress={() => setEditGroup(true)} />
+          <IconButton icon="trash" label="Eliminar grupo" tone="danger" filled onPress={deleteGroup} />
+        </View>
+      )}
 
       <Card style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, flexWrap: 'wrap' }}>
         <Icon name="calendar" size={26} color="primary" />
@@ -163,14 +177,23 @@ function GroupDetail({ group, onBack }) {
           <Text weight="600">Calendario de clases</Text>
           <Text color="textMuted">{group.session_count ? `${group.session_count} clases programadas` : 'Aún no hay fechas de clase'}</Text>
         </View>
-        <Button label={group.session_count ? 'Ver calendario' : 'Configurar fechas'} variant="soft" onPress={() => { setGroupId(group.id); goTo('schedule'); }} />
+        <Button label={group.session_count ? 'Ver calendario' : 'Configurar fechas'} variant="soft" style={compact ? { flexBasis: '100%' } : null} onPress={() => { setGroupId(group.id); goTo('schedule'); }} />
       </Card>
 
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, flexWrap: 'wrap' }}>
-        <Text variant="heading" style={{ flex: 1 }}>Estudiantes ({list.length})</Text>
-        <Button label="Agregar existentes" icon="people" variant="secondary" onPress={() => setAdding(true)} />
-        <Button label="Registrar nuevo" icon="person-add" onPress={() => setCreating(true)} />
-      </View>
+      {compact ? (
+        // Teléfono: título en su línea y botones apilados con todo el ancho
+        <View style={{ gap: space.sm }}>
+          <Text variant="heading">Estudiantes ({list.length})</Text>
+          <Button label="Registrar nuevo" icon="person-add" onPress={() => setCreating(true)} />
+          <Button label="Agregar existentes" icon="people" variant="secondary" onPress={() => setAdding(true)} />
+        </View>
+      ) : (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, flexWrap: 'wrap' }}>
+          <Text variant="heading" style={{ flex: 1 }}>Estudiantes ({list.length})</Text>
+          <Button label="Agregar existentes" icon="people" variant="secondary" onPress={() => setAdding(true)} />
+          <Button label="Registrar nuevo" icon="person-add" onPress={() => setCreating(true)} />
+        </View>
+      )}
 
       {members.error ? <ErrorState error={members.error} onRetry={members.reload} /> : members.loading && !members.data ? <SkeletonList /> : list.length === 0 ? (
         <EmptyState icon="person-add" title="Aún no hay estudiantes" message="Registre a cada estudiante con una foto de frente; no hace falta entrenar nada." />
