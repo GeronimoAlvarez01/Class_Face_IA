@@ -44,8 +44,10 @@ function Root() {
       setGroups(list);
       setGroupsError(null);
       setGroupId((cur) => (list.some((g) => g.id === cur) ? cur : list[0]?.id ?? null));
+      return null;
     } catch (e) {
       setGroupsError(e);
+      return e;
     }
   }, []);
 
@@ -53,7 +55,8 @@ function Root() {
     try {
       setHealth(await api.health());
       setHealthError(null);
-      await reloadGroups();
+      const groupsErr = await reloadGroups();
+      if (groupsErr) return groupsErr.status === 401 ? 'auth' : false; // el servidor responde, pero la clave no sirve
       return true;
     } catch (e) {
       setHealth(null);

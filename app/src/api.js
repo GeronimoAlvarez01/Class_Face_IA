@@ -65,6 +65,8 @@ async function request(method, path, body, { timeoutMs = 30000, baseUrl, token }
 
 export const api = {
   health: (override) => request('GET', '/api/health', undefined, { timeoutMs: 6000, ...override }),
+  // /api/health es público (no pide clave): para validar la clave hay que llamar a una ruta protegida
+  checkAuth: (override) => request('GET', '/api/groups', undefined, { timeoutMs: 6000, ...override }),
 
   groups: {
     list: () => request('GET', '/api/groups').then((r) => r.groups),
