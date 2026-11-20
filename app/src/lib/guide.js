@@ -34,4 +34,26 @@ function computeGuide(view, photo) {
   };
 }
 
-module.exports = { GUIDE_HEIGHT, GUIDE_ASPECT, GUIDE_MAX_WIDTH, ovalSize, computeGuide };
+/**
+ * ¿El rostro está dentro del óvalo? Misma geometría que backend/src/guide.js (el servidor tiene la última palabra).
+ * box = [x1, y1, x2, y2] y guide = { cx, cy, rx, ry }, ambos en fracciones de la foto.
+ * -> { ok: true } | { ok: false, reason: 'outside' | 'too_small' | 'too_big' }
+ */
+function checkFaceInGuide(box, guide, { tolerance = 1.05, minRatio = 0.35 } = {}) {
+  if (!guide || !Array.isArray(box) || box.length !== 4) return { ok: true };
+  const [x1, y1, x2, y2] = box;
+  if ((y2 - y1) < minRatio * 2 * guide.ry) return { ok: false, reason: 'too_small' };
+  const corners = [[x1, y1], [x2, y1], [x1, y2], [x2, y2]];
+  const inside = corners.every(([x, y]) => (((x - guide.cx) / guide.rx) ** 2 + ((y - guide.cy) / guide.ry) ** 2) <= tolerance ** 2);
+  if (inside) return { ok: true };
+  const fitsCentered = (((x2 - x1) / 2 / guide.rx) ** 2 + ((y2 - y1) / 2 / guide.ry) ** 2) <= tolerance ** 2;
+  return { ok: false, reason: fitsCentered ? 'outside' : 'too_big' };
+}
+
+const GUIDE_MESSAGES = {
+  outside: 'Ubica el rostro en el óvalo.',
+  too_small: 'Acércate más.',
+  too_big: 'Aléjate un poco.',
+};
+
+module.exports = { GUIDE_HEIGHT, GUIDE_ASPECT, GUIDE_MAX_WIDTH, ovalSize, computeGuide, checkFaceInGuide, GUIDE_MESSAGES };

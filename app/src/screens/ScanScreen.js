@@ -10,10 +10,12 @@ import { CameraBox, FaceGuide } from '../components/CameraBox';
 import { ResultModal } from '../components/ResultModal';
 import { radius, space, useTheme } from '../theme';
 import { isPresent, pickScanSession } from '../lib/grid';
-import { describeError, describeResult } from '../lib/scan';
+import { describeCheck, describeError, describeResult } from '../lib/scan';
 import { longLabel } from '../lib/dates';
 
-const SCAN_EVERY_MS = 1500; // el escáner automático toma una foto cada 1,5 s mientras no haya una modal abierta
+const SCAN_EVERY_MS = 1500; // sin detector local: revisa el encuadre en el servidor cada 1,5 s mientras no haya una modal
+const LIVE_EVERY_MS = 300;  // con detector local: solo mira si ya está listo (no toma fotos hasta entonces)
+const RETRY_MS = 1500;      // si el servidor no confirma el encuadre, espera antes de volver a intentar
 const WHITE = '#FFFFFF';
 const GLASS = 'rgba(0,0,0,0.55)';
 
@@ -39,6 +41,17 @@ export default function ScanScreen({ groupId, onClose }) {
   const [search, setSearch] = useState('');
   const [manualError, setManualError] = useState(null);
   const [marked, setMarked] = useState(() => new Set()); // marcados en esta sesión de escaneo
+  // Detector de rostros en el dispositivo (web): { status, message, ready } o null si no hay
+  const [live, setLive] = useState(null);
+  const liveRef = useRef(null);
+  // Tras registrar a alguien no se vuelve a disparar hasta que su rostro salga del óvalo (sino lo reconocería en bucle)
+  const armedRef = useRef(true);
+  const onFace = useCallback((s) => {
+    liveRef.current = s;
+    setLive(s);
+    if (s && s.status !== 'ok' && s.status !== 'loading') armedRef.current = true;
+    if (!s?.ready) setHint(null); // el aviso lo da el detector mientras el rostro no esté listo
+  }, []);
 
   const session = useMemo(() => (grid.data ? pickScanSession(grid.data, health?.allow_any_day).session : null), [grid.data, health]);
 
@@ -51,6 +64,7 @@ export default function ScanScreen({ groupId, onClose }) {
   const missing = students.filter((st) => !presentIds.has(st.id));
 
   const markLocal = (id) => setMarked((prev) => new Set(prev).add(id));
+  const detecting = !!live;
 
   const showResult = useCallback((view) => {
     setHint(null);
@@ -62,20 +76,37 @@ export default function ScanScreen({ groupId, onClose }) {
     setModal(null);
   }, [modal]);
 
-  /** Una captura: foto -> backend -> resultado. `manual` ignora el enfriamiento (el profesor tocó el botón). */
+  /**
+   * Una captura. En automático:
+   *  - con detector local: NO se toma ninguna foto hasta que el rostro esté bien ubicado en el óvalo;
+   *  - sin detector: se revisa el encuadre en el servidor (/api/face-check, sin indicador ni modal) y solo si está
+   *    bien ubicado se reconoce esa misma foto.
+   * `manual` (el profesor tocó el botón) reconoce directo e ignora el enfriamiento; el servidor igual exige el óvalo.
+   */
   const attempt = useCallback(async (manual = false) => {
     if (!session || busyRef.current || !camRef.current?.isReady()) return;
     if (!manual && Date.now() < cooldownUntil.current) return;
+    const local = !!liveRef.current; // hay detector local
+    if (!manual && local && (!liveRef.current.ready || !armedRef.current)) return;
     busyRef.current = true;
-    setBusy(true);
     try {
       const photo = await camRef.current.capture(0.5);
+      if (!manual && !local) {
+        const check = describeCheck(await api.faceCheck(photo.base64, photo.guide));
+        if (!check.ready) {
+          setHint(check.message);
+          return;
+        }
+      }
+      setBusy(true);
       const res = await api.recognize(session.id, photo.base64, photo.guide);
       const view = describeResult(res);
       if (view.kind === 'hint') {
         setHint(view.message);
+        if (local) cooldownUntil.current = Date.now() + RETRY_MS; // el servidor vio otra cosa: no insistir enseguida
       } else {
         if (res.student) markLocal(res.student.id); // marked o already_present: ya está en la lista
+        if (local && res.student) armedRef.current = false; // espera a que salga del óvalo
         showResult(view);
       }
     } catch (e) {
@@ -89,9 +120,9 @@ export default function ScanScreen({ groupId, onClose }) {
   // Escáner automático: se detiene mientras haya una modal y se reanuda al cerrarla
   useEffect(() => {
     if (!auto || modal || !session) return undefined;
-    const id = setInterval(() => attempt(false), SCAN_EVERY_MS);
+    const id = setInterval(() => attempt(false), detecting ? LIVE_EVERY_MS : SCAN_EVERY_MS);
     return () => clearInterval(id);
-  }, [auto, modal, session, attempt]);
+  }, [auto, modal, session, attempt, detecting]);
 
   const markManually = async (student) => {
     try {
@@ -116,16 +147,23 @@ export default function ScanScreen({ groupId, onClose }) {
   if (grid.loading && !grid.data) return centered(<ActivityIndicator size="large" />);
   if (grid.error) return centered(<ErrorState error={grid.error} onRetry={grid.reload} />);
   if (!session) {
-    return centered(<EmptyState icon="calendar" title="Hoy no hay clase programada" message="La asistencia solo se toma el día de la clase. Revise el calendario del grupo." />);
+    return centered(<EmptyState icon="calendar" title="Hoy no hay clase programada" message="La asistencia solo se toma el día de la clase. Revisa el calendario del grupo." />);
   }
   if (students.length === 0) {
-    return centered(<EmptyState icon="people" title="El grupo no tiene estudiantes" message="Agregue estudiantes con su foto antes de tomar asistencia." />);
+    return centered(<EmptyState icon="people" title="El grupo no tiene estudiantes" message="Agrega estudiantes con su foto antes de tomar asistencia." />);
   }
 
   // Verde y continuo cuando el rostro quedó reconocido (o ya estaba registrado); rojo si no coincide; ámbar si hay que reencuadrar
   const recognized = modal?.kind === 'success' || modal?.kind === 'info';
-  const guideColor = recognized ? colors.successStrong : modal?.kind === 'error' ? colors.danger : hint ? '#FBBF24' : 'rgba(255,255,255,0.85)';
-  const statusText = busy ? 'Reconociendo…' : hint ?? (auto ? 'Encuadre el rostro dentro del recuadro punteado.' : 'Encuadre el rostro y toque el botón para capturar.');
+  // Con detector local, mientras el rostro no esté listo el aviso es el suyo (acércate, aléjate, ubica el rostro...)
+  const liveHint = live && !live.ready && live.status !== 'ok' && live.status !== 'loading' ? live.message : null;
+  const shownHint = liveHint ?? hint;
+  const waitingNext = !!live && !armedRef.current && live.status === 'ok';
+  const liveInfo = waitingNext ? 'Listo. Que pase el siguiente estudiante.'
+    : live && (live.status === 'ok' || live.status === 'loading') ? live.message : null; // mantén quieto / preparando
+  const guideColor = recognized ? colors.successStrong : modal?.kind === 'error' ? colors.danger : shownHint ? '#FBBF24' : 'rgba(255,255,255,0.85)';
+  const statusText = busy ? 'Reconociendo…'
+    : shownHint ?? liveInfo ?? (auto ? 'Ubica el rostro en el óvalo.' : 'Ubica el rostro en el óvalo y toca el botón para capturar.');
   const filtered = missing.filter((s) => `${s.full_name} ${s.document}`.toLowerCase().includes(search.trim().toLowerCase()));
 
   const panel = (
@@ -161,6 +199,7 @@ export default function ScanScreen({ groupId, onClose }) {
         ref={camRef}
         facing={facing}
         style={{ flex: 1, borderRadius: 0 }}
+        onFace={onFace}
         overlay={(
           <>
             <FaceGuide color={guideColor} solid={recognized} />
@@ -182,7 +221,7 @@ export default function ScanScreen({ groupId, onClose }) {
                 accessibilityLiveRegion="polite"
                 style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, backgroundColor: GLASS, borderRadius: radius.pill, paddingHorizontal: space.lg, paddingVertical: space.sm, maxWidth: '90%' }}
               >
-                {busy ? <ActivityIndicator color={WHITE} size="small" /> : <Icon name={hint ? 'alert-circle' : 'scan'} size={18} color={hint ? '#FBBF24' : WHITE} />}
+                {busy ? <ActivityIndicator color={WHITE} size="small" /> : <Icon name={shownHint ? 'alert-circle' : 'scan'} size={18} color={shownHint ? '#FBBF24' : WHITE} />}
                 <Text variant="small" color={WHITE} style={{ flexShrink: 1 }}>{statusText}</Text>
               </View>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.xl }}>

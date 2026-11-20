@@ -1,9 +1,12 @@
-import React, { forwardRef, useImperativeHandle, useRef, useState } from 'react';
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { ActivityIndicator, Linking, StyleSheet, View } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Button, Icon, Text } from '../ui';
 import { radius, space } from '../theme';
 import { computeGuide, ovalSize } from '../lib/guide';
+import { startFaceWatch } from '../lib/faceWatch';
+
+let cameraCount = 0;
 
 /**
  * Óvalo guía: el rostro debe quedar DENTRO. Con `solid` el trazo pasa de punteado a continuo (se usa en verde
@@ -31,12 +34,25 @@ export function FaceGuide({ color = 'rgba(255,255,255,0.85)', solid = false }) {
  *   capture(quality)   -> { uri, base64, guide }  (calidad 0.5 pesa poco y basta para detectar un rostro;
  *                         `guide` = dónde cae el óvalo dentro de la foto, para que el servidor valide el encuadre)
  * Funciona igual en la tablet (Android) y en el navegador de Mac/Windows con la cámara web.
+ *
+ * `onFace` (opcional): detector de rostros en el dispositivo, sin tomar fotos. Recibe { status, message, ready }
+ * cada vez que cambia, o null si no hay detector local (Android por ahora, o si no cargó): entonces la pantalla
+ * revisa el encuadre en el servidor como antes.
  */
-export const CameraBox = forwardRef(function CameraBox({ facing = 'back', overlay, style }, ref) {
+export const CameraBox = forwardRef(function CameraBox({ facing = 'back', overlay, style, onFace }, ref) {
   const [permission, requestPermission] = useCameraPermissions();
   const cam = useRef(null);
   const ready = useRef(false);
   const layout = useRef(null);
+  const containerId = useRef(null);
+  if (!containerId.current) containerId.current = `camera-box-${++cameraCount}`;
+
+  const granted = !!permission?.granted;
+  useEffect(() => {
+    if (!onFace || !startFaceWatch || !granted) return undefined;
+    const stop = startFaceWatch({ containerId: containerId.current, getLayout: () => layout.current, onChange: onFace });
+    return () => { stop(); onFace(null); };
+  }, [onFace, granted]);
 
   useImperativeHandle(ref, () => ({
     isReady: () => ready.current && !!cam.current,
@@ -68,8 +84,9 @@ export const CameraBox = forwardRef(function CameraBox({ facing = 'back', overla
   }
 
   return (
-    <View style={[box, style]} onLayout={(e) => { layout.current = e.nativeEvent.layout; }}>
-      <CameraView ref={cam} style={StyleSheet.absoluteFill} facing={facing} onCameraReady={() => { ready.current = true; }} />
+    <View nativeID={containerId.current} style={[box, style]} onLayout={(e) => { layout.current = e.nativeEvent.layout; }}>
+      {/* Sin animación de obturador: el escáner revisa el encuadre con una foto por segundo y la pantalla no debe parpadear */}
+      <CameraView ref={cam} style={StyleSheet.absoluteFill} facing={facing} animateShutter={false} onCameraReady={() => { ready.current = true; }} />
       {overlay}
     </View>
   );

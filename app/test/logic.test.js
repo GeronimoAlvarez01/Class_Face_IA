@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const dates = require('../src/lib/dates');
 const grid = require('../src/lib/grid');
-const { describeResult, describeError } = require('../src/lib/scan');
+const { describeCheck, describeResult, describeError } = require('../src/lib/scan');
 
 // ---------- fechas ----------
 
@@ -143,9 +143,19 @@ test('guía: sin medidas no se calcula (el servidor no valida el encuadre)', () 
   assert.equal(computeGuide({ width: 10, height: 10 }, {}), undefined);
 });
 
-test('resultado fuera del recuadro es un aviso discreto, no una modal', () => {
-  const v = describeResult({ status: 'out_of_guide', reason: 'outside', message: 'Encuadre el rostro dentro del recuadro punteado' });
-  assert.equal(v.kind, 'hint');
-  assert.match(v.message, /recuadro/);
-  assert.equal(describeResult({ status: 'out_of_guide' }).kind, 'hint');
+test('resultado fuera del óvalo es un aviso discreto, no una modal', () => {
+  const v = describeResult({ status: 'out_of_guide', reason: 'too_big', message: 'Aléjate un poco' });
+  assert.deepEqual(v, { kind: 'hint', message: 'Aléjate un poco' });
+  assert.deepEqual(describeResult({ status: 'out_of_guide' }), { kind: 'hint', message: 'Ubica el rostro en el óvalo.' });
+});
+
+test('escáner: solo se reconoce cuando el rostro está bien ubicado en el óvalo', () => {
+  assert.deepEqual(describeCheck({ status: 'ok' }), { ready: true });
+  // Mientras no esté listo, solo hay un aviso: no se llama a /recognize
+  assert.deepEqual(describeCheck({ status: 'out_of_guide', reason: 'too_small', message: 'Acércate más' }), { ready: false, message: 'Acércate más' });
+  assert.deepEqual(describeCheck({ status: 'out_of_guide', reason: 'too_big', message: 'Aléjate un poco' }), { ready: false, message: 'Aléjate un poco' });
+  assert.deepEqual(describeCheck({ status: 'out_of_guide', reason: 'outside' }), { ready: false, message: 'Ubica el rostro en el óvalo.' });
+  assert.equal(describeCheck({ status: 'no_face' }).message, 'No veo ningún rostro. Ubica el rostro en el óvalo.');
+  assert.equal(describeCheck({ status: 'multiple_faces' }).message, 'Hay más de una persona. Solo debe verse un rostro.');
+  assert.equal(describeCheck(undefined).ready, false);
 });
