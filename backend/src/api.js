@@ -445,8 +445,8 @@ function buildApi({ db, cfg, recognition, clock }) {
     const img = decodeImage(body.image_base64, 'image_base64');
     const guide = cfg.faceGuide === false ? null : parseGuide(body.guide);
     const result = await recognition.recognize(img.b64, [], { trace: false }); // no es un reconocimiento real: sin trace
-    if (!result.faces) return { status: 'no_face', message: 'No se detectó ningún rostro' };
-    if (result.faces > 1) return { status: 'multiple_faces', message: 'Aparece más de una persona; debe verse un solo rostro' };
+    if (!result.faces) return { status: 'no_face', message: 'No veo ningún rostro. Ubica el rostro en el óvalo' };
+    if (result.faces > 1) return { status: 'multiple_faces', message: 'Hay más de una persona: solo debe verse un rostro' };
     const fit = checkFaceInGuide(result.box, guide);
     if (!fit.ok) return { status: 'out_of_guide', reason: fit.reason, message: GUIDE_MESSAGES[fit.reason] };
     return { status: 'ok' };

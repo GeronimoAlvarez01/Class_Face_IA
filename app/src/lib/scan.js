@@ -4,6 +4,22 @@
 //   kind 'hint'                        -> aviso discreto sobre la cámara (sin modal: con el escáner automático
 //                                         una modal por cada cuadro sin rostro sería insoportable)
 
+const PLACE_FACE = 'Ubica el rostro en el óvalo.';
+const NO_FACE = 'No veo ningún rostro. Ubica el rostro en el óvalo.';
+const MULTIPLE = 'Hay más de una persona. Solo debe verse un rostro.';
+
+/**
+ * Escáner automático, fase 1: con la respuesta de /api/face-check decide si ya se puede reconocer.
+ *   { ready: true }                    -> el rostro está bien ubicado: se envía esa misma foto a reconocer
+ *   { ready: false, message }          -> aviso discreto (acércate, aléjate, ubica el rostro...) y no se reconoce
+ */
+function describeCheck(res) {
+  if (res?.status === 'ok') return { ready: true };
+  if (res?.status === 'no_face') return { ready: false, message: NO_FACE };
+  if (res?.status === 'multiple_faces') return { ready: false, message: MULTIPLE };
+  return { ready: false, message: res?.message || PLACE_FACE };
+}
+
 function describeResult(res) {
   switch (res?.status) {
     case 'marked':
@@ -19,16 +35,16 @@ function describeResult(res) {
     case 'unknown':
       return {
         kind: 'error', title: 'No se pudo reconocer al estudiante',
-        message: 'No coincide con nadie de este grupo. Pídale que mire de frente, se acerque un poco y revise la luz.',
+        message: 'No coincide con nadie de este grupo. Pídele que mire de frente, se acerque un poco y revisa la luz.',
         autoCloseMs: null, cooldownMs: 0, actions: ['retry', 'manual'],
       };
     case 'no_face':
-      return { kind: 'hint', message: 'No veo ningún rostro. Enfoque al estudiante de frente.' };
+      return { kind: 'hint', message: NO_FACE };
     case 'multiple_faces':
-      return { kind: 'hint', message: 'Hay más de una persona. Enfoque a un solo estudiante.' };
+      return { kind: 'hint', message: MULTIPLE };
     case 'out_of_guide':
-      // El rostro se detectó pero no está dentro del recuadro punteado: no se marca nada
-      return { kind: 'hint', message: res.message || 'Encuadre el rostro dentro del recuadro punteado.' };
+      // El rostro se detectó pero no está dentro del óvalo (corrido, muy lejos o muy cerca): no se marca nada
+      return { kind: 'hint', message: res.message || PLACE_FACE };
     default:
       return { kind: 'hint', message: 'Respuesta inesperada del servidor.' };
   }
@@ -38,8 +54,8 @@ function describeResult(res) {
 function describeError(err) {
   const status = err?.status ?? 0;
   let message = err?.message || 'Ocurrió un error inesperado.';
-  if (status === 0) message = 'No hay conexión con el servidor. Revise que la tablet y el computador estén en la misma red Wi-Fi.';
-  if (status === 503) message = 'El servicio de reconocimiento no está disponible. Avise al administrador.';
+  if (status === 0) message = 'No hay conexión con el servidor. Revisa que la tablet y el computador estén en la misma red Wi-Fi.';
+  if (status === 503) message = 'El servicio de reconocimiento no está disponible. Avisa al administrador.';
   if (status === 409) {
     // Reglas de negocio del backend: clase de otro día, cancelada, grupo sin estudiantes...
     return { kind: 'error', title: 'No se puede tomar asistencia ahora', message, autoCloseMs: null, cooldownMs: 0, actions: [] };
@@ -47,4 +63,4 @@ function describeError(err) {
   return { kind: 'error', title: 'No se pudo tomar la asistencia', message, autoCloseMs: null, cooldownMs: 0, actions: ['retry'] };
 }
 
-module.exports = { describeResult, describeError };
+module.exports = { describeCheck, describeResult, describeError };

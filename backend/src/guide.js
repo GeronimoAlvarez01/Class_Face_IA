@@ -25,7 +25,8 @@ function parseGuide(raw) {
 
 /**
  * box = [x1, y1, x2, y2] normalizada 0..1 (la del servicio de reconocimiento).
- * -> { ok: true } | { ok: false, reason: 'outside' | 'too_small' }
+ * -> { ok: true } | { ok: false, reason: 'outside' | 'too_small' | 'too_big' }
+ * Si el rostro no cabe: 'too_big' cuando ni centrado cabría (está muy cerca), 'outside' cuando solo está corrido.
  */
 function checkFaceInGuide(box, guide) {
   if (!guide || !Array.isArray(box) || box.length !== 4) return { ok: true }; // sin datos suficientes: no se bloquea
@@ -33,12 +34,15 @@ function checkFaceInGuide(box, guide) {
   if ((y2 - y1) < MIN_FACE_RATIO * 2 * guide.ry) return { ok: false, reason: 'too_small' };
   const corners = [[x1, y1], [x2, y1], [x1, y2], [x2, y2]];
   const inside = corners.every(([x, y]) => (((x - guide.cx) / guide.rx) ** 2 + ((y - guide.cy) / guide.ry) ** 2) <= TOLERANCE ** 2);
-  return inside ? { ok: true } : { ok: false, reason: 'outside' };
+  if (inside) return { ok: true };
+  const fitsCentered = (((x2 - x1) / 2 / guide.rx) ** 2 + ((y2 - y1) / 2 / guide.ry) ** 2) <= TOLERANCE ** 2;
+  return { ok: false, reason: fitsCentered ? 'outside' : 'too_big' };
 }
 
 const GUIDE_MESSAGES = {
-  outside: 'Encuadre el rostro dentro del recuadro punteado',
-  too_small: 'Acérquese un poco más: el rostro debe llenar el recuadro',
+  outside: 'Ubica el rostro en el óvalo',
+  too_small: 'Acércate más',
+  too_big: 'Aléjate un poco',
 };
 
 module.exports = { parseGuide, checkFaceInGuide, GUIDE_MESSAGES, TOLERANCE, MIN_FACE_RATIO };

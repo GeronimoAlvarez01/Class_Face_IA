@@ -10,10 +10,10 @@ import { CameraBox, FaceGuide } from '../components/CameraBox';
 import { ResultModal } from '../components/ResultModal';
 import { radius, space, useTheme } from '../theme';
 import { isPresent, pickScanSession } from '../lib/grid';
-import { describeError, describeResult } from '../lib/scan';
+import { describeCheck, describeError, describeResult } from '../lib/scan';
 import { longLabel } from '../lib/dates';
 
-const SCAN_EVERY_MS = 1500; // el escáner automático toma una foto cada 1,5 s mientras no haya una modal abierta
+const SCAN_EVERY_MS = 1500; // el escáner automático revisa el encuadre cada 1,5 s mientras no haya una modal abierta
 const WHITE = '#FFFFFF';
 const GLASS = 'rgba(0,0,0,0.55)';
 
@@ -62,14 +62,25 @@ export default function ScanScreen({ groupId, onClose }) {
     setModal(null);
   }, [modal]);
 
-  /** Una captura: foto -> backend -> resultado. `manual` ignora el enfriamiento (el profesor tocó el botón). */
+  /**
+   * Una captura. En automático va en dos fases: primero se revisa el encuadre (/api/face-check, sin indicador de
+   * carga ni modal) y solo si el rostro está bien ubicado en el óvalo se reconoce esa misma foto.
+   * `manual` (el profesor tocó el botón) reconoce directo e ignora el enfriamiento; el servidor igual exige el óvalo.
+   */
   const attempt = useCallback(async (manual = false) => {
     if (!session || busyRef.current || !camRef.current?.isReady()) return;
     if (!manual && Date.now() < cooldownUntil.current) return;
     busyRef.current = true;
-    setBusy(true);
     try {
       const photo = await camRef.current.capture(0.5);
+      if (!manual) {
+        const check = describeCheck(await api.faceCheck(photo.base64, photo.guide));
+        if (!check.ready) {
+          setHint(check.message);
+          return;
+        }
+      }
+      setBusy(true);
       const res = await api.recognize(session.id, photo.base64, photo.guide);
       const view = describeResult(res);
       if (view.kind === 'hint') {
@@ -116,16 +127,16 @@ export default function ScanScreen({ groupId, onClose }) {
   if (grid.loading && !grid.data) return centered(<ActivityIndicator size="large" />);
   if (grid.error) return centered(<ErrorState error={grid.error} onRetry={grid.reload} />);
   if (!session) {
-    return centered(<EmptyState icon="calendar" title="Hoy no hay clase programada" message="La asistencia solo se toma el día de la clase. Revise el calendario del grupo." />);
+    return centered(<EmptyState icon="calendar" title="Hoy no hay clase programada" message="La asistencia solo se toma el día de la clase. Revisa el calendario del grupo." />);
   }
   if (students.length === 0) {
-    return centered(<EmptyState icon="people" title="El grupo no tiene estudiantes" message="Agregue estudiantes con su foto antes de tomar asistencia." />);
+    return centered(<EmptyState icon="people" title="El grupo no tiene estudiantes" message="Agrega estudiantes con su foto antes de tomar asistencia." />);
   }
 
   // Verde y continuo cuando el rostro quedó reconocido (o ya estaba registrado); rojo si no coincide; ámbar si hay que reencuadrar
   const recognized = modal?.kind === 'success' || modal?.kind === 'info';
   const guideColor = recognized ? colors.successStrong : modal?.kind === 'error' ? colors.danger : hint ? '#FBBF24' : 'rgba(255,255,255,0.85)';
-  const statusText = busy ? 'Reconociendo…' : hint ?? (auto ? 'Encuadre el rostro dentro del recuadro punteado.' : 'Encuadre el rostro y toque el botón para capturar.');
+  const statusText = busy ? 'Reconociendo…' : hint ?? (auto ? 'Ubica el rostro en el óvalo.' : 'Ubica el rostro en el óvalo y toca el botón para capturar.');
   const filtered = missing.filter((s) => `${s.full_name} ${s.document}`.toLowerCase().includes(search.trim().toLowerCase()));
 
   const panel = (

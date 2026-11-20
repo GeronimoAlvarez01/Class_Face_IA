@@ -69,7 +69,8 @@ export const CameraBox = forwardRef(function CameraBox({ facing = 'back', overla
 
   return (
     <View style={[box, style]} onLayout={(e) => { layout.current = e.nativeEvent.layout; }}>
-      <CameraView ref={cam} style={StyleSheet.absoluteFill} facing={facing} onCameraReady={() => { ready.current = true; }} />
+      {/* Sin animación de obturador: el escáner revisa el encuadre con una foto por segundo y la pantalla no debe parpadear */}
+      <CameraView ref={cam} style={StyleSheet.absoluteFill} facing={facing} animateShutter={false} onCameraReady={() => { ready.current = true; }} />
       {overlay}
     </View>
   );

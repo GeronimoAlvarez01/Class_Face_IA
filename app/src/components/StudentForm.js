@@ -27,7 +27,7 @@ function CaptureModal({ visible, onClose, onCaptured }) {
   const busyRef = useRef(false);
   const doneRef = useRef(false);
   const [facing, setFacing] = useState('front');
-  const [hint, setHint] = useState('Ubique su rostro dentro del recuadro punteado.');
+  const [hint, setHint] = useState('Ubica el rostro en el óvalo.');
   const [problem, setProblem] = useState(false);
   const [result, setResult] = useState(null);   // la modal "Foto registrada correctamente"
   const [photo, setPhoto] = useState(null);
@@ -39,7 +39,7 @@ function CaptureModal({ visible, onClose, onCaptured }) {
     setResult(null);
     setPhoto(null);
     setProblem(false);
-    setHint('Ubique su rostro dentro del recuadro punteado.');
+    setHint('Ubica el rostro en el óvalo.');
 
     const tick = async () => {
       if (busyRef.current || doneRef.current || !camRef.current?.isReady()) return;
@@ -49,12 +49,12 @@ function CaptureModal({ visible, onClose, onCaptured }) {
         const probe = await camRef.current.capture(0.4);
         const first = await api.faceCheck(probe.base64, probe.guide);
         if (doneRef.current) return;
-        if (first.status !== 'ok') { setProblem(true); setHint(first.message ?? 'Encuadre el rostro dentro del recuadro.'); return; }
+        if (first.status !== 'ok') { setProblem(true); setHint(first.message ?? 'Ubica el rostro en el óvalo.'); return; }
         // 2) foto buena (es la referencia de por vida del estudiante) y se comprueba ELLA, no solo el cuadro de prueba
         const final = await camRef.current.capture(0.8);
         const second = await api.faceCheck(final.base64, final.guide);
         if (doneRef.current) return;
-        if (second.status !== 'ok') { setProblem(true); setHint(second.message ?? 'Mantenga el rostro quieto dentro del recuadro.'); return; }
+        if (second.status !== 'ok') { setProblem(true); setHint(second.message ?? 'Mantén el rostro quieto dentro del óvalo.'); return; }
         doneRef.current = true;
         setProblem(false);
         setPhoto(final);
