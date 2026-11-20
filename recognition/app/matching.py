@@ -11,6 +11,8 @@ class Match:
     student_id: str | None  # None = desconocido
     similarity: float       # mejor similitud coseno entre los candidatos inscritos
     reason: str             # ok | below_threshold | ambiguous | no_candidates
+    # Similitud con cada candidato inscrito, de mayor a menor (para el modo demo; no cambia la decisión)
+    scores: tuple[tuple[str, float], ...] = ()
 
 
 def identify(
@@ -39,9 +41,10 @@ def identify(
         return Match(None, 0.0, "no_candidates")
 
     scores.sort(reverse=True)
+    ranked = tuple((sid, sim) for sim, sid in scores)
     best_sim, best_id = scores[0]
     if best_sim < tau:
-        return Match(None, best_sim, "below_threshold")
+        return Match(None, best_sim, "below_threshold", ranked)
     if min_margin > 0 and len(scores) > 1 and (best_sim - scores[1][0]) < min_margin:
-        return Match(None, best_sim, "ambiguous")
-    return Match(best_id, best_sim, "ok")
+        return Match(None, best_sim, "ambiguous", ranked)
+    return Match(best_id, best_sim, "ok", ranked)

@@ -5,6 +5,7 @@ const { HttpError } = require('./http');
  *   POST   /enroll        { student_id, image_base64, replace }        -> 200 { ok: true } | 422 { detail }
  *   DELETE /students/{id}                                              -> 200 | 404
  *   POST   /recognize     { image_base64, candidate_ids: [..] }        -> 200 { faces, match: id|null, similarity, box }
+ * Con DEMO_TRACE=1 las respuestas de /enroll y /recognize traen además `trace` (ver recognition/app/main.py).
  * `candidate_ids` restringe la comparación a los estudiantes del grupo: menos candidatos = menos falsas asistencias.
  * `box` = [x1, y1, x2, y2] normalizada 0..1 del rostro único (o null). Con candidate_ids = [] solo detecta el rostro.
  */
@@ -12,6 +13,8 @@ function createRecognitionClient(cfg, fetchImpl = globalThis.fetch) {
   if (cfg.recognitionMode === 'mock') return createMockClient();
 
   const base = cfg.recognitionUrl.replace(/\/+$/, '');
+  // Modo demo: se le pide al servicio el trace de cada etapa. Con demo apagado el contrato queda exactamente igual.
+  const demo = cfg.demoTrace === true;
 
   async function call(method, pathname, payload) {
     let res;
@@ -33,7 +36,9 @@ function createRecognitionClient(cfg, fetchImpl = globalThis.fetch) {
     }
     if (res.status === 422) {
       const detail = typeof data?.detail === 'string' ? data.detail : 'La foto no sirve para el reconocimiento';
-      throw new HttpError(422, detail);
+      const err = new HttpError(422, detail);
+      if (data?.trace) err.trace = data.trace; // el visor también muestra por qué falló una inscripción; no sale por la API
+      throw err;
     }
     if (method === 'DELETE' && res.status === 404) return { ok: true };
     if (!res.ok) throw new HttpError(502, 'Error en el servicio de reconocimiento', { status: res.status });
@@ -41,9 +46,14 @@ function createRecognitionClient(cfg, fetchImpl = globalThis.fetch) {
   }
 
   return {
-    enroll: (document, imageBase64) => call('POST', '/enroll', { student_id: document, image_base64: imageBase64, replace: true }),
+    enroll: (document, imageBase64) => call('POST', '/enroll', {
+      student_id: document, image_base64: imageBase64, replace: true, ...(demo ? { trace: true } : {}),
+    }),
     remove: (document) => call('DELETE', `/students/${encodeURIComponent(document)}`),
-    recognize: (imageBase64, candidateIds) => call('POST', '/recognize', { image_base64: imageBase64, candidate_ids: candidateIds }),
+    // opts.trace === false: llamadas que no son un reconocimiento de verdad (comprobación del recuadro guía)
+    recognize: (imageBase64, candidateIds, opts = {}) => call('POST', '/recognize', {
+      image_base64: imageBase64, candidate_ids: candidateIds, ...(demo ? { trace: opts.trace !== false } : {}),
+    }),
   };
 }
 

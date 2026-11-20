@@ -13,12 +13,14 @@ import StudentsScreen from './src/screens/StudentsScreen';
 import ScheduleScreen from './src/screens/ScheduleScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import ScanScreen from './src/screens/ScanScreen';
+import LabScreen from './src/screens/LabScreen';
 
 const SCREENS = {
   attendance: AttendanceScreen,
   groups: GroupsScreen,
   students: StudentsScreen,
   schedule: ScheduleScreen,
+  lab: LabScreen,
   settings: SettingsScreen,
 };
 
@@ -42,8 +44,10 @@ function Root() {
       setGroups(list);
       setGroupsError(null);
       setGroupId((cur) => (list.some((g) => g.id === cur) ? cur : list[0]?.id ?? null));
+      return null;
     } catch (e) {
       setGroupsError(e);
+      return e;
     }
   }, []);
 
@@ -51,7 +55,8 @@ function Root() {
     try {
       setHealth(await api.health());
       setHealthError(null);
-      await reloadGroups();
+      const groupsErr = await reloadGroups();
+      if (groupsErr) return groupsErr.status === 401 ? 'auth' : false; // el servidor responde, pero la clave no sirve
       return true;
     } catch (e) {
       setHealth(null);
@@ -103,7 +108,7 @@ function Root() {
       {scanGroupId ? (
         <ScanScreen groupId={scanGroupId} onClose={() => { setScanGroupId(null); setRefreshKey((k) => k + 1); }} />
       ) : (
-        <AppShell route={route} onNavigate={setRoute} connectionError={healthError && getApiConfig().baseUrl ? healthError : null}>
+        <AppShell route={route} onNavigate={setRoute} labEnabled={health?.demo_trace === true} connectionError={healthError && getApiConfig().baseUrl ? healthError : null}>
           <Screen />
         </AppShell>
       )}
