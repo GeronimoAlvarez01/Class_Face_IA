@@ -13,12 +13,14 @@ import StudentsScreen from './src/screens/StudentsScreen';
 import ScheduleScreen from './src/screens/ScheduleScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import ScanScreen from './src/screens/ScanScreen';
+import LabScreen from './src/screens/LabScreen';
 
 const SCREENS = {
   attendance: AttendanceScreen,
   groups: GroupsScreen,
   students: StudentsScreen,
   schedule: ScheduleScreen,
+  lab: LabScreen,
   settings: SettingsScreen,
 };
 
@@ -103,7 +105,7 @@ function Root() {
       {scanGroupId ? (
         <ScanScreen groupId={scanGroupId} onClose={() => { setScanGroupId(null); setRefreshKey((k) => k + 1); }} />
       ) : (
-        <AppShell route={route} onNavigate={setRoute} connectionError={healthError && getApiConfig().baseUrl ? healthError : null}>
+        <AppShell route={route} onNavigate={setRoute} labEnabled={health?.demo_trace === true} connectionError={healthError && getApiConfig().baseUrl ? healthError : null}>
           <Screen />
         </AppShell>
       )}

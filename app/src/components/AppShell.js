@@ -11,6 +11,11 @@ export const NAV_ITEMS = [
   { key: 'schedule', label: 'Calendario', icon: 'calendar' },
   { key: 'settings', label: 'Ajustes', icon: 'settings' },
 ];
+// Solo aparece con el modo demo encendido en el servidor (DEMO_TRACE=1)
+const LAB_ITEM = { key: 'lab', label: 'Laboratorio', icon: 'flask' };
+export const navItems = (labEnabled) => (labEnabled
+  ? [...NAV_ITEMS.slice(0, -1), LAB_ITEM, NAV_ITEMS[NAV_ITEMS.length - 1]]
+  : NAV_ITEMS);
 export const RAIL_WIDTH = 104;
 
 function NavItem({ item, active, onPress, horizontal }) {
@@ -34,11 +39,12 @@ function NavItem({ item, active, onPress, horizontal }) {
 }
 
 /** Tablet (≥ 720 dp): riel de navegación a la izquierda. Teléfono: barra inferior. */
-export function AppShell({ route, onNavigate, connectionError, children }) {
+export function AppShell({ route, onNavigate, connectionError, labEnabled, children }) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const wide = width >= 720;
+  const items = navItems(labEnabled);
 
   const banner = connectionError ? (
     <View accessibilityRole="alert" style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.md, backgroundColor: colors.dangerSoft, borderBottomWidth: 1, borderColor: colors.danger }}>
@@ -60,7 +66,7 @@ export function AppShell({ route, onNavigate, connectionError, children }) {
               accessibilityLabel="Logo"
             />
           </View>
-          {NAV_ITEMS.map((it) => <NavItem key={it.key} item={it} active={route === it.key} onPress={onNavigate} />)}
+          {items.map((it) => <NavItem key={it.key} item={it} active={route === it.key} onPress={onNavigate} />)}
         </View>
         <View style={{ flex: 1, paddingTop: insets.top }}>
           {banner}
@@ -77,7 +83,7 @@ export function AppShell({ route, onNavigate, connectionError, children }) {
         {children}
       </View>
       <View style={{ flexDirection: 'row', backgroundColor: colors.surface, borderTopWidth: 1, borderColor: colors.border, paddingBottom: insets.bottom, paddingTop: space.xs }}>
-        {NAV_ITEMS.map((it) => <NavItem key={it.key} item={it} active={route === it.key} onPress={onNavigate} horizontal />)}
+        {items.map((it) => <NavItem key={it.key} item={it} active={route === it.key} onPress={onNavigate} horizontal />)}
       </View>
     </View>
   );

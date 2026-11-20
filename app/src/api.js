@@ -97,6 +97,9 @@ export const api = {
   recognize: (sessionId, imageBase64, guide) =>
     request('POST', `/api/sessions/${sessionId}/recognize`, { image_base64: imageBase64, guide }, { timeoutMs: 25000 }),
 
+  // Laboratorio IA (modo demo). Sin `since` solo fija el cursor; con `since` trae los recorridos nuevos (solo con rostro).
+  trace: (since) => request('GET', since === undefined ? '/api/trace' : `/api/trace?since=${since}&faces=1&limit=5`, undefined, { timeoutMs: 8000 }),
+
   // ¿Hay un rostro bien encuadrado? No guarda nada; lo usa el registro de estudiantes para tomar la foto sola.
   faceCheck: (imageBase64, guide) =>
     request('POST', '/api/face-check', { image_base64: imageBase64, guide }, { timeoutMs: 25000 }),
