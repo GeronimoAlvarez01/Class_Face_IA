@@ -94,13 +94,13 @@ def test_galeria_persiste_entre_reinicios_y_reemplaza(tmp_path):
 
 # ---------- servicio real (uvicorn) con motor falso ----------
 
-@pytest.fixture()
-def service(tmp_path):
+def start_service(tmp_path, engine, **settings_kw):
+    """Levanta el servicio real con uvicorn; devuelve (call, parar)."""
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
-    settings = Settings(data_dir=tmp_path, weights_path=None, tau=0.55, min_margin=0.05)
-    server = uvicorn.Server(uvicorn.Config(create_app(lambda _s: FakeEngine(), settings),
+    settings = Settings(data_dir=tmp_path, weights_path=None, tau=0.55, min_margin=0.05, **settings_kw)
+    server = uvicorn.Server(uvicorn.Config(create_app(lambda _s: engine, settings),
                                            host="127.0.0.1", port=port, log_level="error"))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
@@ -119,9 +119,18 @@ def service(tmp_path):
         except urllib.error.HTTPError as e:
             return e.code, json.loads(e.read())
 
+    def stop():
+        server.should_exit = True
+        thread.join(timeout=5)
+
+    return call, stop
+
+
+@pytest.fixture()
+def service(tmp_path):
+    call, stop = start_service(tmp_path, FakeEngine())
     yield call, tmp_path
-    server.should_exit = True
-    thread.join(timeout=5)
+    stop()
 
 
 def test_flujo_completo_inscribir_reconocer_y_borrar(service):
@@ -179,3 +188,107 @@ def test_recognize_devuelve_la_caja_del_rostro_y_sirve_solo_para_detectar(servic
     # Sin rostro no hay caja
     r = call("POST", "/recognize", {"image_base64": png_b64((255, 255, 255)), "candidate_ids": []})[1]
     assert r["faces"] == 0 and "box" not in r
+
+
+# ---------- modo demo (DEMO_TRACE): el trace es opcional y nunca cambia la decisión ----------
+
+class TraceFakeEngine(FakeEngine):
+    """Como FakeEngine, pero con trace (lo que haría FacenetEngine con trace=True)."""
+    supports_trace = True
+
+    def analyze(self, image, trace=False):
+        res = super().analyze(image)
+        if not trace:
+            return res
+        tr = {"image": {"width": image.width, "height": image.height},
+              "detection": {"faces": [], "faces_counted": res.faces}, "timings_ms": {"detect": 1.0}}
+        return FaceResult(res.faces, res.embedding, res.box, tr)
+
+
+@pytest.fixture()
+def trace_service(tmp_path):
+    call, stop = start_service(tmp_path, TraceFakeEngine(), demo_trace=True)
+    yield call
+    stop()
+
+
+def test_sin_demo_trace_no_se_envia_nada_extra(tmp_path):
+    call, stop = start_service(tmp_path, TraceFakeEngine(), demo_trace=False)   # el motor sabe hacer trace, el servidor no lo activa
+    try:
+        assert call("GET", "/health")[1]["demo_trace"] is False
+        call("POST", "/enroll", {"student_id": "1007074776", "image_base64": png_b64(SAMUEL, 0), "replace": True, "trace": True})
+        st, r = call("POST", "/recognize", {"image_base64": png_b64(SAMUEL, 77), "candidate_ids": ["1007074776"], "trace": True})
+        assert st == 200 and r["match"] == "1007074776" and "trace" not in r   # el cliente no puede encenderlo
+    finally:
+        stop()
+
+
+def test_motor_sin_soporte_de_trace_sigue_funcionando_con_demo_trace(tmp_path):
+    call, stop = start_service(tmp_path, FakeEngine(), demo_trace=True)         # FakeEngine.analyze(image) no acepta trace
+    try:
+        assert call("GET", "/health")[1]["demo_trace"] is False
+        call("POST", "/enroll", {"student_id": "1007074776", "image_base64": png_b64(SAMUEL, 0), "replace": True})
+        st, r = call("POST", "/recognize", {"image_base64": png_b64(SAMUEL, 77), "candidate_ids": ["1007074776"]})
+        assert st == 200 and r["match"] == "1007074776" and "trace" not in r
+    finally:
+        stop()
+
+
+def test_recognize_con_trace_incluye_etapas_similitudes_y_decision(trace_service):
+    call = trace_service
+    assert call("GET", "/health")[1]["demo_trace"] is True
+    call("POST", "/enroll", {"student_id": "1007074776", "image_base64": png_b64(SAMUEL, 0), "replace": True})
+    call("POST", "/enroll", {"student_id": "1152712132", "image_base64": png_b64(CAMILO, 0), "replace": True})
+    both = ["1007074776", "1152712132", "9999999999"]                              # el tercero no está inscrito
+
+    st, r = call("POST", "/recognize", {"image_base64": png_b64(SAMUEL, 77), "candidate_ids": both})
+    assert st == 200 and r["match"] == "1007074776"                                # la decisión es la misma que sin trace
+    tr = r["trace"]
+    assert tr["kind"] == "recognize" and tr["outcome"] == "ok" and tr["engine"] == "fake"
+    assert tr["input"]["image"].startswith("data:image/jpeg;base64,")
+    assert {"decode", "compare", "detect"} <= set(tr["timings_ms"])
+    c = tr["comparison"]
+    assert (c["candidates"], c["enrolled"], c["match"], c["reason"]) == (3, 2, "1007074776", "ok")
+    assert [x["student_id"] for x in c["scores"]] == ["1007074776", "1152712132"]   # de mayor a menor, sin el no inscrito
+    assert c["scores"][0]["similarity"] == r["similarity"] and c["margin"] > 0.05
+    assert tr["params"] == {"tau": 0.55, "min_margin": 0.05}
+
+    # El cliente sí puede apagarlo en una llamada concreta (p. ej. la comprobación del recuadro guía)
+    r = call("POST", "/recognize", {"image_base64": png_b64(SAMUEL, 77), "candidate_ids": both, "trace": False})[1]
+    assert "trace" not in r and r["match"] == "1007074776"
+
+
+def test_trace_de_casos_sin_comparacion_y_de_rechazo(trace_service):
+    call = trace_service
+    call("POST", "/enroll", {"student_id": "1007074776", "image_base64": png_b64(SAMUEL, 0), "replace": True})
+    r = call("POST", "/recognize", {"image_base64": png_b64((255, 255, 255)), "candidate_ids": ["1007074776"]})[1]
+    assert r["faces"] == 0 and r["trace"]["outcome"] == "no_face" and "comparison" not in r["trace"]
+    r = call("POST", "/recognize", {"image_base64": png_b64(SAMUEL, 0, width=32), "candidate_ids": ["1007074776"]})[1]
+    assert r["trace"]["outcome"] == "multiple_faces"
+    r = call("POST", "/recognize", {"image_base64": png_b64(DESCONOCIDO, 5), "candidate_ids": ["1007074776"]})[1]
+    assert r["match"] is None and r["trace"]["outcome"] == "below_threshold"
+    assert r["trace"]["comparison"]["scores"][0]["similarity"] < 0.55
+    r = call("POST", "/recognize", {"image_base64": png_b64(SAMUEL, 0), "candidate_ids": []})[1]    # solo detectar
+    assert r["trace"]["outcome"] == "no_candidates" and r["trace"]["comparison"]["scores"] == []
+
+
+def test_enroll_con_trace_informa_el_almacenamiento_y_los_fallos(trace_service):
+    call = trace_service
+    st, r = call("POST", "/enroll", {"student_id": "1007074776", "image_base64": png_b64(SAMUEL, 0), "replace": True})
+    assert st == 200 and r["trace"]["kind"] == "enroll" and r["trace"]["outcome"] == "stored"
+    assert r["trace"]["storage"] == {"student_id": "1007074776", "replaced": False, "gallery_size": 1}
+    r = call("POST", "/enroll", {"student_id": "1007074776", "image_base64": png_b64(SAMUEL, 9), "replace": True})[1]
+    assert r["trace"]["storage"]["replaced"] is True and r["trace"]["storage"]["gallery_size"] == 1
+    st, r = call("POST", "/enroll", {"student_id": "1152712132", "image_base64": png_b64((255, 255, 255)), "replace": True})
+    assert st == 422 and "rostro" in r["detail"] and r["trace"]["outcome"] == "no_face"
+    assert call("GET", "/health")[1]["students"] == 1                              # el fallo no inscribió a nadie
+
+
+def test_identify_devuelve_todas_las_similitudes_sin_cambiar_la_decision():
+    gallery = {"a": emb(1).reshape(1, -1), "b": emb(2).reshape(1, -1)}
+    m = identify(emb(1), gallery, ["a", "b", "falta"], tau=0.55, min_margin=0.05)
+    assert m.student_id == "a" and [sid for sid, _ in m.scores] == ["a", "b"]
+    assert m.scores[0][1] > m.scores[1][1]
+    m = identify(emb(3), gallery, ["a", "b"], tau=0.55)
+    assert m.reason == "below_threshold" and len(m.scores) == 2
+    assert identify(emb(1), gallery, [], tau=0.55).scores == ()
