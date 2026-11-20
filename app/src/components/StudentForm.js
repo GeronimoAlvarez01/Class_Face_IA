@@ -136,8 +136,8 @@ function CaptureModal({ visible, onClose, onCaptured }) {
             </>
           )}
         />
-        {/* Dentro de este Modal para que se vea encima en iOS y Android */}
-        <ResultModal result={result} onClose={finish} />
+        {/* Capa dentro de este Modal (no otro Modal encima): en iOS, cerrar los dos a la vez dejaba la cámara pegada en negro */}
+        <ResultModal result={result} onClose={finish} inline />
       </View>
     </Modal>
   );

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import { ScrollView, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../api';
 import { useApp } from '../context';
@@ -35,6 +35,7 @@ function Legend() {
 export default function AttendanceScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const compact = useWindowDimensions().width < 600; // teléfono
   const { toast } = useFeedback();
   const { health, groups, groupsError, reloadGroups, groupId, setGroupId, goTo, startScan, refreshKey } = useApp();
 
@@ -163,14 +164,30 @@ export default function AttendanceScreen() {
       {pendingCount > 0 ? (
         <View style={{ position: 'absolute', left: space.xl, right: space.xl, bottom: space.xl + insets.bottom }}>
           <Card style={{
-            flexDirection: 'row', alignItems: 'center', gap: space.md, flexWrap: 'wrap', borderColor: colors.warning,
+            flexDirection: compact ? 'column' : 'row', alignItems: compact ? 'stretch' : 'center', gap: space.md, flexWrap: compact ? 'nowrap' : 'wrap',
+            borderColor: colors.warning,
             shadowColor: colors.shadow, shadowOpacity: 0.18, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 8,
           }}
           >
-            <Chip tone="warning" icon="create" label={`${pendingCount} ${pendingCount === 1 ? 'cambio' : 'cambios'} sin guardar`} />
-            <View style={{ flex: 1 }} />
-            <Button label="Descartar" variant="secondary" disabled={saving} onPress={() => setPending({})} />
-            <Button label="Guardar cambios" icon="save" loading={saving} onPress={save} />
+            {compact ? (
+              // Teléfono: aviso arriba y los dos botones del mismo ancho debajo
+              <>
+                <View style={{ alignItems: 'flex-start' }}>
+                  <Chip tone="warning" icon="create" label={`${pendingCount} ${pendingCount === 1 ? 'cambio' : 'cambios'} sin guardar`} />
+                </View>
+                <View style={{ flexDirection: 'row', gap: space.sm }}>
+                  <Button label="Descartar" variant="secondary" disabled={saving} onPress={() => setPending({})} />
+                  <Button label="Guardar cambios" icon="save" loading={saving} style={{ flex: 1 }} onPress={save} />
+                </View>
+              </>
+            ) : (
+              <>
+                <Chip tone="warning" icon="create" label={`${pendingCount} ${pendingCount === 1 ? 'cambio' : 'cambios'} sin guardar`} />
+                <View style={{ flex: 1 }} />
+                <Button label="Descartar" variant="secondary" disabled={saving} onPress={() => setPending({})} />
+                <Button label="Guardar cambios" icon="save" loading={saving} onPress={save} />
+              </>
+            )}
           </Card>
         </View>
       ) : null}

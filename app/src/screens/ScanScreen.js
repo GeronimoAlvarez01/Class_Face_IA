@@ -366,7 +366,7 @@ export default function ScanScreen({ groupId, onClose }) {
           label="Buscar estudiante"
           value={search}
           onChangeText={(t) => { setSearch(t); setManualError(null); }}
-          placeholder="Nombre o documento"
+          placeholder="Documento"
           returnKeyType="search"
           onSubmitEditing={validateDocument}
         />
