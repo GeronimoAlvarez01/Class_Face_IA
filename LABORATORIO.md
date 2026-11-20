@@ -25,6 +25,37 @@ cd app
 npx expo start --web
 ```
 
+### En Windows (PowerShell)
+
+Abran **una ventana de PowerShell por cada servidor**. La variable solo vale en esa ventana.
+
+```powershell
+# 1. Servicio de reconocimiento (Python)
+cd recognition
+.venv\Scripts\Activate.ps1        # solo si usan el entorno virtual del proyecto
+$env:DEMO_TRACE = "1"
+uvicorn server:app --host 127.0.0.1 --port 8001
+
+# 2. Backend (Node)
+cd backend
+$env:DEMO_TRACE = "1"
+$env:ADMIN_TOKEN = "<clave>"
+npm start
+
+# 3. Pantalla de la demo
+cd app
+npx expo start --web
+```
+
+En `cmd` (no PowerShell) la variable se pone así: `set DEMO_TRACE=1`.
+
+Para que la tablet llegue al backend, averigüen la IP del equipo con `ipconfig` (línea "Dirección IPv4")
+y permitan el puerto 3000 en el firewall (PowerShell como administrador):
+
+```powershell
+New-NetFirewallRule -DisplayName "Asistencia backend" -Direction Inbound -Protocol TCP -LocalPort 3000 -Action Allow
+```
+
 Luego, en la app del portátil: **Ajustes** → URL del servidor (`http://<ip-del-backend>:3000`) y token.
 La pestaña **Laboratorio** aparece sola cuando `/api/health` informa `demo_trace: true`.
 La tablet (o el celular de tu compañero) sigue usando la app normal contra el mismo backend.
