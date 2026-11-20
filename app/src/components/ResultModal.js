@@ -15,8 +15,10 @@ const TONES = {
  *   success -> "Asistencia tomada correctamente" (se cierra sola; la barra muestra cuánto falta)
  *   info    -> el estudiante ya estaba registrado
  *   error   -> no se reconoció: NO se cierra sola; ofrece reintentar o marcar a mano
+ * `inline`: se dibuja como capa dentro de la pantalla que lo contiene, no como otro Modal. Úselo cuando ya está
+ * dentro de un Modal: en iOS, cerrar un Modal con otro encima deja la pantalla de abajo pegada (en negro).
  */
-export function ResultModal({ result, onClose, onRetry, onManual }) {
+export function ResultModal({ result, onClose, onRetry, onManual, inline = false }) {
   const { colors } = useTheme();
   const scale = useRef(new Animated.Value(0.7)).current;
   const progress = useRef(new Animated.Value(0)).current;
@@ -40,9 +42,8 @@ export function ResultModal({ result, onClose, onRetry, onManual }) {
   const wantsRetry = result.actions?.includes('retry');
   const wantsManual = result.actions?.includes('manual');
 
-  return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <View style={{ flex: 1, backgroundColor: colors.overlay, alignItems: 'center', justifyContent: 'center', padding: space.xl }}>
+  const content = (
+      <View style={[inline ? StyleSheet.absoluteFill : { flex: 1 }, { backgroundColor: colors.overlay, alignItems: 'center', justifyContent: 'center', padding: space.xl }]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Cerrar" />
         <Animated.View
           accessibilityLiveRegion="assertive"
@@ -89,6 +90,11 @@ export function ResultModal({ result, onClose, onRetry, onManual }) {
           ) : null}
         </Animated.View>
       </View>
+  );
+  if (inline) return content;
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+      {content}
     </Modal>
   );
 }

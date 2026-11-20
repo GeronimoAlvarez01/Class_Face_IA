@@ -7,6 +7,7 @@ import { photoUrl } from '../api';
 
 const COL_W = 76;
 const ROW_H = 76;
+const ROW_H_COMPACT = 124; // teléfono: foto y porcentaje arriba, nombre y documento debajo
 const HEAD_H = 92;
 const FOOT_H = 48;
 
@@ -19,6 +20,8 @@ export function AttendanceGrid({ grid, pending, onToggle, onPhoto }) {
   const { colors } = useTheme();
   const { width } = useWindowDimensions();
   const nameW = width >= 900 ? 360 : width >= 600 ? 280 : 200;
+  const compact = width < 600;
+  const rowH = compact ? ROW_H_COMPACT : ROW_H;
   const hScroll = useRef(null);
   const { sessions, students, today } = grid;
 
@@ -60,7 +63,7 @@ export function AttendanceGrid({ grid, pending, onToggle, onPhoto }) {
     const changed = key in pending;
     const auto = student.cells?.[s.id]?.source === 'auto' && present && !changed;
     return (
-      <View key={s.id} style={{ width: COL_W, height: ROW_H, alignItems: 'center', justifyContent: 'center', borderLeftWidth: 1, borderColor: colors.border }}>
+      <View key={s.id} style={{ width: COL_W, height: rowH, alignItems: 'center', justifyContent: 'center', borderLeftWidth: 1, borderColor: colors.border }}>
         <Pressable
           disabled={!s.editable}
           onPress={() => { haptic.tap(); onToggle(student, s); }}
@@ -97,17 +100,33 @@ export function AttendanceGrid({ grid, pending, onToggle, onPhoto }) {
             </View>
             {students.map((st) => {
               const sum = stats(st, sessions, pending);
+              const photo = (
+                <Pressable onPress={() => onPhoto(st)} accessibilityRole="button" accessibilityLabel={`Ver foto de ${st.full_name}`}>
+                  <Avatar name={st.full_name} url={photoUrl(st)} size={40} />
+                </Pressable>
+              );
+              const pct = <Chip label={sum.pct === null ? '—' : `${sum.pct}%`} tone={pctTone(sum.pct)} />;
+              if (compact) {
+                return (
+                  <View key={st.id} style={{ height: rowH, flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingHorizontal: space.sm, borderTopWidth: 1, borderColor: colors.border }}>
+                    <Text variant="caption" color="textMuted" style={{ width: 16, textAlign: 'center' }}>{st.index}</Text>
+                    <View style={{ flex: 1, gap: 6 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>{photo}{pct}</View>
+                      <Text variant="small" weight="600" numberOfLines={2}>{st.full_name}</Text>
+                      <Text variant="caption" color="textMuted" numberOfLines={1}>{st.document}</Text>
+                    </View>
+                  </View>
+                );
+              }
               return (
                 <View key={st.id} style={{ height: ROW_H, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.md, borderTopWidth: 1, borderColor: colors.border }}>
                   <Text variant="caption" color="textMuted" style={{ width: 20, textAlign: 'center' }}>{st.index}</Text>
-                  <Pressable onPress={() => onPhoto(st)} accessibilityRole="button" accessibilityLabel={`Ver foto de ${st.full_name}`}>
-                    <Avatar name={st.full_name} url={photoUrl(st)} size={40} />
-                  </Pressable>
+                  {photo}
                   <View style={{ flex: 1, gap: 4 }}>
                     <Text variant="small" weight="600" numberOfLines={2}>{st.full_name}</Text>
                     <Text variant="caption" color="textMuted">{st.document}</Text>
                   </View>
-                  <Chip label={sum.pct === null ? '—' : `${sum.pct}%`} tone={pctTone(sum.pct)} />
+                  {pct}
                 </View>
               );
             })}
