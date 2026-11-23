@@ -234,16 +234,17 @@ export function Sheet({ visible, onClose, title, children, footer, wide }) {
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={{ width: centered ? (wide ? 760 : 560) : '100%', maxHeight: height * 0.92 }}
         >
+          {/* maxHeight + flexShrink en el ScrollView: si el contenido no cabe, el cuerpo hace scroll y el pie queda visible */}
           <View style={{
             backgroundColor: colors.surface, overflow: 'hidden', borderRadius: centered ? radius.xl : 0,
-            borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
+            borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, maxHeight: height * 0.92,
           }}
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', paddingLeft: space.xl, paddingRight: space.sm, paddingTop: space.sm }}>
               <Text variant="heading" style={{ flex: 1 }} accessibilityRole="header">{title}</Text>
               <IconButton icon="close" label="Cerrar" onPress={onClose} />
             </View>
-            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: space.xl, paddingTop: space.md, gap: space.lg }}>
+            <ScrollView style={{ flexShrink: 1 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator contentContainerStyle={{ padding: space.xl, paddingTop: space.md, gap: space.lg }}>
               {children}
             </ScrollView>
             {footer ? (
